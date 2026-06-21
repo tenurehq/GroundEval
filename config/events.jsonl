@@ -1,0 +1,3 @@
+{"id":"evt-001","type":"escalation_opened","timestamp":"2026-03-05T10:00:00","actors":["alice"],"artifact_ids":{"jira":"ESC-42","slack":"slack-101"},"facts":{"account_id":"acct-acme","severity":"high"}}
+{"id":"evt-002","type":"postmortem_created","timestamp":"2026-03-07T14:30:00","actors":["alice","carol"],"artifact_ids":{"jira":"ESC-42","confluence":"CONF-9"},"facts":{"account_id":"acct-acme","source_ticket":"ESC-42"}}
+{"id":"evt-003","type":"escalation_opened","timestamp":"2026-03-10T09:00:00","actors":["bob"],"artifact_ids":{"jira":"ESC-99","slack":"slack-102"},"facts":{"account_id":"acct-beta","severity":"medium"}}

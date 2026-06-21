@@ -1,0 +1,13 @@
+services:
+  orgforge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./data:/app/data:ro
+      - ./config.yaml:/app/config.yaml:ro
+      - ./output:/app/output
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Change the command to run generate, eval, or any subcommand
+    command: ["eval", "--config", "/app/config.yaml", "--questions", "/app/data/eval_questions.json", "--events", "/app/data/events.jsonl"]

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "groundeval"
+dynamic = ["version"]
+readme = "README.md"
+description = "Generalizable agentic evaluation framework for PERSPECTIVE, COUNTERFACTUAL, and SILENCE tracks."
+requires-python = ">=3.13"
+dependencies = [
+    "anthropic>=0.111.0",
+    "openai>=2.43.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+groundeval = "groundeval.run:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.4.0",
+    "pytest",
+]
+
+[tool.setuptools_scm]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+
+[tool.ruff]
+src = ["src"]
+format.preview = true
+
+[tool.ruff.lint]
+select = ["E", "F", "B"]
