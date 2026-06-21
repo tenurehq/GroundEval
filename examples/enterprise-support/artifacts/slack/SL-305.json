@@ -1,0 +1,8 @@
+{
+  "id": "SL-305",
+  "timestamp": "2026-03-10T11:30:00",
+  "subsystem": "slack",
+  "channel": "engineering",
+  "sender": "priya",
+  "text": "ESC-105: Hooli rate-limit investigation. Maria checking the gateway config."
+}

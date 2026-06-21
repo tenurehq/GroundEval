@@ -1,0 +1,10 @@
+{
+  "id": "FA-602",
+  "timestamp": "2026-03-11T10:00:00",
+  "subsystem": "fraud_alerts",
+  "application": "CRM-1003",
+  "analyst": "Lee",
+  "severity": "low",
+  "finding": "Income discrepancy cross-checked with employer. Applicant self-reported error \u2014 actual income $52K, not $72K. No fraudulent intent.",
+  "status": "cleared \u2014 low risk"
+}

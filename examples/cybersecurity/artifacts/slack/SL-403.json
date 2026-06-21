@@ -1,0 +1,8 @@
+{
+  "id": "SL-403",
+  "timestamp": "2026-03-10T09:00:00",
+  "subsystem": "slack",
+  "channel": "threat-intel",
+  "sender": "rick",
+  "text": "Retro hunt complete. No APT-Orange matches found in last 90 days across any sensor. Clean bill of health. Publishing summary to Confluence."
+}

@@ -8,65 +8,18 @@ CLI entrypoint. Two commands:
 
     python -m groundeval eval --config config.yaml --questions eval_questions.json
         Runs an agent against the questions and writes results.json.
-
-Minimal viable config.yaml:
-
-    output_dir: ./eval_output
-
-    actors:
-      alice: engineer
-      bob: sales
-
-    roles:
-      engineer:
-        subsystems: [jira, git, slack, confluence, email]
-        broadcast_event_types: [incident_opened, incident_resolved]
-      sales:
-        subsystems: [salesforce, email, slack]
-
-    # optional: point at a directory of JSON artifact files
-    artifacts_dir: ./artifacts
-
-    # Optional — fine-tune perspective question balance
-    perspective:
-      positive_ratio: 0.5
-      negative_permission_ratio: 0.25
-      negative_temporal_ratio: 0.25
-      require_cross_subsystem_cases: true
-
-    causal_links:
-      - name: ticket_closed_after_incident
-        cause_event_type: incident_opened
-        effect_event_type: ticket_closed
-        premise_template: "the incident had been caught earlier"
-        outcome_template: "the ticket would have closed sooner"
-        outcome_changed: true
-        join:
-          - cause: artifact_ids.jira
-            effect: artifact_ids.jira
-
-    silence_pairs:
-      - trigger_event_type: escalation_opened
-        response_event_type: postmortem_created
-        search_space_subsystems: [confluence, jira]
-        search_space:
-          - subsystem: confluence
-            query_template: "postmortem {artifact_ids.jira}"
-          - subsystem: jira
-            id_template: "{artifact_ids.jira}"
-        max_gap_days: 7
 """
 
 from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
+import copy
 import json
 import logging
 from datetime import datetime
-import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+import random as _random
 
 import yaml
 
@@ -98,12 +51,69 @@ from .scorers import (
 logger = logging.getLogger("groundeval")
 
 
+def _merge_with_defaults(main_cfg: dict) -> dict:
+    """Load evaluation defaults from config/evaluation.yaml and merge main_cfg on top."""
+    defaults_path = Path("config/evaluation.yaml")
+    if not defaults_path.exists():
+        logger.warning(
+            f"  Defaults file not found at {defaults_path}; using main config as-is."
+        )
+        return dict(main_cfg)
+
+    with open(defaults_path) as f:
+        defaults = yaml.safe_load(f)
+        if not isinstance(defaults, dict):
+            raise ValueError("evaluation.yaml must be a YAML mapping")
+
+    merged = dict(defaults)
+    merged.update(main_cfg)
+    return merged
+
+
+def _warn_config_mismatch(cfg: dict, metadata: dict) -> None:
+    """
+    Compare current config against metadata embedded in the questions file.
+    Warns when causal_links or silence_pairs counts differ from what was
+    used during generation — the user may be evaluating against stale questions.
+    """
+    meta_links = metadata.get("causal_links")
+    meta_absences = metadata.get("absences")
+
+    cur_links = len(cfg.get("causal_links", []))
+    cur_silence = len(cfg.get("silence_pairs", []))
+
+    if meta_links is not None and cur_links != meta_links:
+        logger.warning(
+            f"  Config has {cur_links} causal_link spec(s), but the questions file "
+            f"was generated with {meta_links}. Re-run 'generate' if you changed "
+            f"causal_links."
+        )
+
+    if meta_absences is not None and cur_silence != meta_absences:
+        logger.warning(
+            f"  Config has {cur_silence} silence_pair spec(s), but the questions file "
+            f"was generated with {meta_absences} absence records. Re-run 'generate' "
+            f"if you changed silence_pairs."
+        )
+
+
 def cmd_generate(args) -> None:
     with open(args.config) as f:
         raw_cfg = yaml.safe_load(f)
         if not isinstance(raw_cfg, dict):
             raise ValueError(f"Expected YAML mapping, got {type(raw_cfg).__name__}")
         cfg: dict = raw_cfg
+
+    cfg = _merge_with_defaults(cfg)
+
+    seed = cfg.get("seed")
+    if seed is not None:
+        _random.seed(seed)
+        logger.info(f"  Random seed set to {seed}")
+
+    from .config_schema import validate_config
+
+    validate_config(cfg, command="generate")
 
     out_dir = Path(cfg.get("output_dir", "./eval_output"))
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -141,7 +151,7 @@ def cmd_generate(args) -> None:
 
     links_path = out_dir / "causal_links.json"
     with open(links_path, "w") as f:
-        json.dump([l.to_dict() for l in causal_links], f, indent=2)
+        json.dump([link.to_dict() for link in causal_links], f, indent=2)
 
     logger.info("Building absence catalog...")
     absence_builder = AbsenceCatalogBuilder(events, silence_specs, corpus)
@@ -174,6 +184,12 @@ def cmd_generate(args) -> None:
         llm_fn=llm_fn,
         perspective_actors=perspective_actors,
         perspective_config=perspective_config,
+        max_perspective=cfg.get("max_perspective_questions"),
+        max_counterfactual=cfg.get("max_counterfactual_questions"),
+        max_silence=cfg.get("max_silence_questions"),
+        easy_ratio=float(cfg.get("easy_ratio", 0.34)),
+        medium_ratio=float(cfg.get("medium_ratio", 0.33)),
+        hard_ratio=float(cfg.get("hard_ratio", 0.33)),
     )
     questions = generator.generate()
     logger.info(f"  {len(questions)} questions generated")
@@ -193,6 +209,7 @@ def cmd_generate(args) -> None:
                     "by_type": by_type,
                     "causal_links": len(causal_links),
                     "absences": len(absences),
+                    "seed": seed,
                 },
                 "questions": [q.to_dict() for q in questions],
             },
@@ -211,6 +228,17 @@ def cmd_eval(args) -> None:
             raise ValueError(f"Expected YAML mapping, got {type(raw_cfg).__name__}")
         cfg: dict = raw_cfg
 
+    cfg = _merge_with_defaults(cfg)
+
+    seed = cfg.get("seed")
+    if seed is not None:
+        _random.seed(seed)
+        logger.info(f"  Random seed set to {seed}")
+
+    from .config_schema import validate_config
+
+    validate_config(cfg, command="eval")
+
     out_dir = Path(cfg.get("output_dir", "./eval_output"))
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -224,6 +252,9 @@ def cmd_eval(args) -> None:
         for q in data["questions"]
     ]
 
+    metadata = data.get("metadata", {})
+    _warn_config_mismatch(cfg, metadata)
+
     if args.types:
         questions = [q for q in questions if q.question_type in args.types]
     if args.max_questions:
@@ -236,10 +267,11 @@ def cmd_eval(args) -> None:
     events = load_events(Path(args.events)) if args.events else []
     use_event_log_policy = cfg.get("use_event_log_policy", True)
     if use_event_log_policy and not args.events:
-        logger.warning(
-            "--events not provided but use_event_log_policy=true in config. "
-            "EventLogPolicy will have empty event-derived visibility; "
-            "falling back to role-based subsystems only."
+        raise SystemExit(
+            "ERROR: --events is required when use_event_log_policy=true. "
+            "The event log is needed to build EventLogPolicy visibility cones. "
+            "Either pass --events <path> or set use_event_log_policy: false "
+            "in your config to use role-based subsystem visibility only."
         )
     policy = (
         EventLogPolicy(cfg, events) if use_event_log_policy else YamlAccessPolicy(cfg)
@@ -262,8 +294,8 @@ def cmd_eval(args) -> None:
     counterfactual_scorer = CounterfactualScorer()
     silence_scorer = SilenceScorer()
 
-    results: List[EvalResult] = []
-    per_question: List[dict] = []
+    results: list[EvalResult] = []
+    per_question: list[dict] = []
 
     for i, question in enumerate(questions):
         logger.info(
@@ -306,7 +338,8 @@ def cmd_eval(args) -> None:
         )
 
     summary = aggregate(results)
-    model_safe = args.model.replace("/", "_").replace(":", "_")
+    resolved_model = cfg.get("model") or args.model
+    model_safe = resolved_model.replace("/", "_").replace(":", "_")
     out_path = out_dir / f"results_{model_safe}.json"
     with open(out_path, "w") as f:
         json.dump(
@@ -361,9 +394,14 @@ def _run_one(
     if qtype == "SILENCE" and question.expected_search_space:
         steps = max(steps, len(question.expected_search_space) + 5)
 
+    agent_question = copy.copy(question)
+    agent_question.expected_search_space = None
+    agent_question.actor_visible_artifacts = None
+    agent_question.actor_subsystem_access = None
+
     if zero_shot:
         trajectory, final_answer = agent_fn(
-            question=question,
+            question=agent_question,
             context="(no artifacts or tools available)",
             tools=None,
             max_steps=1,
@@ -371,7 +409,7 @@ def _run_one(
     elif context_injection:
         context = _build_context(question, corpus)
         trajectory, final_answer = agent_fn(
-            question=question,
+            question=agent_question,
             context=context,
             tools=None,
             max_steps=steps,
@@ -402,9 +440,18 @@ def _run_one(
             actor_subsystem_access=actor_subsystems,
         )
 
+        all_subsystems = sorted(
+            set(
+                corpus.subsystem_of(aid)
+                for aid in corpus.list_ids()
+                if corpus.subsystem_of(aid)
+            )
+        )
+        runtime._all_subsystems = all_subsystems
+
         tool_specs = _build_tool_specs(cfg={})
         trajectory, final_answer = agent_fn(
-            question=question,
+            question=agent_question,
             context=None,
             tools=tool_specs,
             max_steps=steps,
@@ -464,7 +511,7 @@ def _run_one(
 def _build_context(
     question: EvalQuestion,
     corpus,
-    max_tokens: Optional[int] = None,
+    max_tokens: int | None = None,
 ) -> str:
     """
     For context-injection mode: fetch relevant artifacts and pack into a string.
@@ -490,7 +537,7 @@ def _build_context(
 
         ranked.sort(key=_recency, reverse=True)
 
-    chunks: List[str] = []
+    chunks: list[str] = []
     tokens_used = 0
 
     for aid in ranked:
@@ -507,7 +554,7 @@ def _build_context(
     return "\n\n".join(chunks) if chunks else "(no artifacts available)"
 
 
-def _build_tool_specs(cfg: dict) -> List[dict]:
+def _build_tool_specs(cfg: dict) -> list[dict]:
     """
     Returns a minimal tool spec list for the agent.
     Users can extend this in their own agent_fn.
@@ -535,6 +582,82 @@ def _build_agent_fn(cfg: dict, args) -> Callable[..., tuple[AgentTrajectory, dic
 
     provider = ModelProvider.from_config(cfg)
     return build_agent_fn(provider)
+
+
+def _validate_config(cfg: dict, events_path: Path | None) -> None:
+    """
+    Validate a config + event log without generating questions.
+
+    Checks:
+      1. Config schema (known keys, required warnings)
+      2. Event log is parseable
+      3. Artifact IDs referenced in events exist in the corpus
+      4. Actor/role definitions are consistent
+    """
+    from .config_schema import validate_config
+
+    validate_config(cfg, command="validate")
+
+    logger.info("  Config schema: OK")
+
+    if events_path:
+        events = load_events(events_path)
+        logger.info(f"  Events: {len(events)} loaded")
+
+        actors_declared = set(cfg.get("actors", {}).keys())
+        actors_in_events: set[str] = set()
+        for e in events:
+            actors_in_events.update(e.actors)
+
+        undeclared = actors_in_events - actors_declared
+        if undeclared:
+            logger.warning(
+                f"  {len(undeclared)} actor(s) appear in events but are not "
+                f"declared in config.actors: {sorted(undeclared)[:10]}"
+            )
+
+        artifacts_dir = cfg.get("artifacts_dir")
+        if artifacts_dir:
+            corpus = FileCorpusAdapter(artifacts_dir)
+            all_ids = set(corpus.list_ids())
+            missing: set[str] = set()
+            for e in events:
+                for val in e.artifact_ids.values():
+                    aids = val if isinstance(val, list) else [val]
+                    for aid in aids:
+                        if aid and aid not in all_ids:
+                            missing.add(aid)
+            if missing:
+                logger.warning(
+                    f"  {len(missing)} artifact ID(s) referenced in events "
+                    f"but not found in the corpus: {sorted(missing)[:10]}"
+                )
+            else:
+                logger.info("  Artifacts: all event-referenced IDs found in corpus")
+        else:
+            logger.info("  Artifacts: no artifacts_dir set (context-injection mode)")
+
+    if cfg.get("causal_links"):
+        logger.info(f"  Causal links: {len(cfg['causal_links'])} spec(s)")
+    else:
+        logger.warning("  Causal links: none (no COUNTERFACTUAL questions)")
+
+    if cfg.get("silence_pairs"):
+        logger.info(f"  Silence pairs: {len(cfg['silence_pairs'])} spec(s)")
+    else:
+        logger.warning("  Silence pairs: none (no SILENCE questions)")
+
+    if "perspective" in cfg:
+        pc = PerspectiveConfig.from_dict(cfg["perspective"])
+        logger.info(
+            f"  Perspective: positive={pc.positive_ratio} "
+            f"neg_perm={pc.negative_permission_ratio} "
+            f"neg_temp={pc.negative_temporal_ratio}"
+        )
+    else:
+        logger.info("  Perspective: using defaults")
+
+    logger.info("Validation complete. No errors.")
 
 
 def main():
@@ -592,12 +715,25 @@ def main():
     )
     ev.add_argument("--max-questions", type=int, default=None)
 
+    val = sub.add_parser(
+        "validate", help="Validate config + events without generating questions"
+    )
+    val.add_argument("--config", required=True, help="Path to config.yaml")
+    val.add_argument("--events", required=False, help="Path to events.jsonl (optional)")
+
     args = parser.parse_args()
 
     if args.command == "generate":
         cmd_generate(args)
     elif args.command == "eval":
         cmd_eval(args)
+    elif args.command == "validate":
+        with open(args.config) as f:
+            raw_cfg = yaml.safe_load(f)
+            if not isinstance(raw_cfg, dict):
+                raise ValueError(f"Expected YAML mapping, got {type(raw_cfg).__name__}")
+        events_path = Path(args.events) if args.events else None
+        _validate_config(raw_cfg, events_path)
 
 
 if __name__ == "__main__":

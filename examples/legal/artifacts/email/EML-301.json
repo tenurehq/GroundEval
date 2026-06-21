@@ -1,0 +1,9 @@
+{
+  "id": "EML-301",
+  "timestamp": "2026-03-01T10:00:00",
+  "subsystem": "email",
+  "from": "associate_ramirez",
+  "to": "client_acme_rep",
+  "subject": "Draft SaaS MSA",
+  "body": "Please review. Focus on Section 12 (Indemnity) and Section 18 (Data Processing)."
+}

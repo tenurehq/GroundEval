@@ -1,0 +1,11 @@
+{
+  "id": "PHARM-501",
+  "timestamp": "2026-03-02T09:45:00",
+  "subsystem": "pharmacy",
+  "type": "medication_order",
+  "patient": "Maria Gonzales",
+  "drug": "sodium polystyrene sulfonate",
+  "initial_dose": "30g",
+  "adjusted_dose": "45g",
+  "pharmacist": "Dr. Williams"
+}

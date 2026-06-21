@@ -1,0 +1,12 @@
+{
+  "id": "RED-205",
+  "timestamp": "2026-03-07T10:00:00",
+  "subsystem": "redlines",
+  "contract": "CON-103",
+  "version": "v2.0-final",
+  "changes": [
+    "price agreed $42.50",
+    "indemnity accepted"
+  ],
+  "author": "opp_counsel_jones"
+}

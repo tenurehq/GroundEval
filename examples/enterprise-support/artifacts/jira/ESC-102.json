@@ -1,0 +1,10 @@
+{
+  "id": "ESC-102",
+  "timestamp": "2026-03-07T22:30:00",
+  "subsystem": "jira",
+  "type": "incident",
+  "title": "Search API Slowdown",
+  "status": "Resolved",
+  "assignee": "maria",
+  "body": "Search API latency spiked to 8s at 22:30 UTC. DB replica experienced a brief failover event. Service auto-recovered after failover to standby replica. No manual intervention required."
+}

@@ -1,0 +1,10 @@
+{
+  "id": "FA-601",
+  "timestamp": "2026-03-05T09:00:00",
+  "subsystem": "fraud_alerts",
+  "application": "CRM-1002",
+  "analyst": "Lee",
+  "severity": "high",
+  "finding": "Bank statements show inconsistent month-over-month balance growth (18% to 34% to 27%). Pattern does not match deposit history. Suspected alteration.",
+  "status": "confirmed"
+}

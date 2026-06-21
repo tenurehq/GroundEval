@@ -1,0 +1,10 @@
+{
+  "id": "ZD-510",
+  "timestamp": "2026-03-08T10:00:00",
+  "subsystem": "zendesk",
+  "type": "ticket",
+  "customer": "Globex Inc",
+  "priority": "high",
+  "title": "Data inconsistency in Q1 reports",
+  "body": "Globex reports show incorrect revenue figures. Affects their board presentation next week. Urgent."
+}

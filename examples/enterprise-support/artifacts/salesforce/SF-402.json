@@ -1,0 +1,9 @@
+{
+  "id": "SF-402",
+  "timestamp": "2026-03-20T09:00:00",
+  "subsystem": "salesforce",
+  "type": "alert",
+  "account_name": "Cyberdyne",
+  "health_score": 40,
+  "notes": "Health score critical after auth outage. Account flagged for immediate retention intervention."
+}

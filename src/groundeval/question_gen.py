@@ -4,9 +4,6 @@ groundeval/question_gen.py
 Generates PERSPECTIVE, COUNTERFACTUAL, and SILENCE questions
 from a generic event log + user-supplied causal link / silence pair specs.
 
-No domain-specific logic. Domain coupling is eliminated by treating
-causal links and silence pairs as configuration rather than hardcoded dispatch.
-
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TRACK 1 — PERSPECTIVE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -30,16 +27,6 @@ if no response event fired, absence is ground truth. Each question includes
 an expected_search_space — the artifact IDs the agent MUST check before
 concluding absence. Correct "no" without searching scores 0 on trajectory.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Design principles
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- Ground truth is always derived from the event log. LLMs only write prose.
-- Question prose generation includes a structured validation loop (3 attempts).
-- Actor visibility cones are first-class data structures, not a scoring afterthought.
-- Subsystem access is explicitly modeled per actor via AccessPolicy.
-- The absence catalog is built by pattern-matching expected event pairs, not heuristics.
-- SILENCE sampling is stratified by trigger_event_type to prevent clustering.
-- COUNTERFACTUAL questions rotate across 5 phrasing styles to prevent monotony.
 """
 
 from __future__ import annotations
@@ -50,7 +37,7 @@ import random
 import re
 from collections import defaultdict
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from .core import (
     AbsenceRecord,
@@ -69,7 +56,7 @@ from .core import AccessPolicy, CorpusAdapter
 logger = logging.getLogger("groundeval.question_gen")
 
 
-_COUNTERFACTUAL_STYLES: List[str] = [
+_COUNTERFACTUAL_STYLES: list[str] = [
     "Phrase it as a direct counterfactual: 'If X had not happened, would Y have occurred?'",
     "Phrase it as a hypothetical: 'Had X not taken place, would Y still have happened?'",
     "Phrase it from the outcome perspective: 'Would Y have occurred without X happening first?'",
@@ -77,7 +64,7 @@ _COUNTERFACTUAL_STYLES: List[str] = [
     "Phrase it as a dependency question: 'Did Y depend on X occurring, or was it independently triggered?'",
 ]
 
-_NEGATIVE_COUNTERFACTUAL_STYLES: List[str] = [
+_NEGATIVE_COUNTERFACTUAL_STYLES: list[str] = [
     "Phrase it to suggest the cause was necessary: 'If X had not happened, would Y still have occurred?'",
     "Phrase it as a dependency question: 'Was Y dependent on X, or would it have happened regardless?'",
     "Phrase it from the effect perspective: 'Would Y have been prevented if only X had been different?'",
@@ -85,14 +72,14 @@ _NEGATIVE_COUNTERFACTUAL_STYLES: List[str] = [
     "Phrase it as an alternate history: 'Had X not taken place, would the outcome still have been Y?'",
 ]
 
-_SILENCE_STYLES: List[str] = [
+_SILENCE_STYLES: list[str] = [
     "Phrase it as a process compliance question a manager would ask.",
     "Phrase it as an audit question checking whether a response was documented.",
     "Phrase it as an operational question about whether follow-up occurred.",
     "Phrase it as a gap analysis question about whether proper procedure was followed.",
 ]
 
-_PERSPECTIVE_STYLES: List[str] = [
+_PERSPECTIVE_STYLES: list[str] = [
     "Phrase it from the actor's point of view, as if an auditor is checking their awareness.",
     "Phrase it as a knowledge audit: did this actor have access to the facts at the time?",
     "Phrase it as an accountability question about information silos.",
@@ -101,7 +88,7 @@ _PERSPECTIVE_STYLES: List[str] = [
 ]
 
 
-_TRIVIAL_SEARCH_SPACE: Set[str] = set()
+_TRIVIAL_SEARCH_SPACE: set[str] = set()
 
 _MAX_QUESTIONS_PER_ACTOR = 5
 _MAX_QUESTIONS_PER_EVENT_TYPE = 5
@@ -122,17 +109,17 @@ class CausalLinkIndexer:
 
     MAX_LINKS_PER_SPEC = 5
 
-    def __init__(self, events: List[LogEvent], specs: List[CausalLinkSpec]):
+    def __init__(self, events: list[LogEvent], specs: list[CausalLinkSpec]):
         self._events = sorted(events, key=lambda e: e.timestamp)
         self._specs = specs
 
-    def build(self) -> List[CausalLink]:
-        links: List[CausalLink] = []
+    def build(self) -> list[CausalLink]:
+        links: list[CausalLink] = []
         for spec in self._specs:
             links.extend(self._index_spec(spec))
         return links
 
-    def _index_spec(self, spec: CausalLinkSpec) -> List[CausalLink]:
+    def _index_spec(self, spec: CausalLinkSpec) -> list[CausalLink]:
         cause_candidates = [
             e
             for e in self._events
@@ -179,7 +166,7 @@ class CausalLinkIndexer:
 
         return links
 
-    def _find_effect(self, cause: LogEvent, spec: CausalLinkSpec) -> Optional[LogEvent]:
+    def _find_effect(self, cause: LogEvent, spec: CausalLinkSpec) -> LogEvent | None:
         """
         Find the first effect event after cause, within max_gap_days,
         that also satisfies all join conditions.
@@ -202,7 +189,7 @@ class CausalLinkIndexer:
         return None
 
     def _join_matches(
-        self, cause: LogEvent, effect: LogEvent, joins: List[CausalJoinSpec]
+        self, cause: LogEvent, effect: LogEvent, joins: list[CausalJoinSpec]
     ) -> bool:
         """Evaluate all join conditions between cause and effect events."""
         if not joins:
@@ -221,7 +208,7 @@ class CausalLinkIndexer:
     def _match_filter(
         self,
         event: LogEvent,
-        match_field: Optional[str],
+        match_field: str | None,
         match_value: Any,
     ) -> bool:
         if match_field is None:
@@ -229,7 +216,7 @@ class CausalLinkIndexer:
         val = event.resolve(match_field)
         return val == match_value
 
-    def _collect_artifacts(self, event: LogEvent) -> List[str]:
+    def _collect_artifacts(self, event: LogEvent) -> list[str]:
         ids = []
         for val in event.artifact_ids.values():
             if isinstance(val, list):
@@ -269,17 +256,17 @@ class AbsenceCatalogBuilder:
 
     def __init__(
         self,
-        events: List[LogEvent],
-        specs: List[SilencePairSpec],
-        corpus: Optional[CorpusAdapter] = None,
+        events: list[LogEvent],
+        specs: list[SilencePairSpec],
+        corpus: CorpusAdapter | None = None,
     ):
         self._events = sorted(events, key=lambda e: e.timestamp)
         self._specs = specs
         self._corpus = corpus
 
-    def build(self) -> Tuple[List[AbsenceRecord], List[LogEvent]]:
-        absences: List[AbsenceRecord] = []
-        confirmed: List[LogEvent] = []
+    def build(self) -> tuple[list[AbsenceRecord], list[LogEvent]]:
+        absences: list[AbsenceRecord] = []
+        confirmed: list[LogEvent] = []
 
         for spec in self._specs:
             a, c = self._scan_spec(spec)
@@ -290,7 +277,7 @@ class AbsenceCatalogBuilder:
 
     def _scan_spec(
         self, spec: SilencePairSpec
-    ) -> Tuple[List[AbsenceRecord], List[LogEvent]]:
+    ) -> tuple[list[AbsenceRecord], list[LogEvent]]:
         triggers = [
             e
             for e in self._events
@@ -298,8 +285,8 @@ class AbsenceCatalogBuilder:
             and self._match_filter(e, spec.match_field, spec.match_value)
         ]
 
-        absences: List[AbsenceRecord] = []
-        confirmed: List[LogEvent] = []
+        absences: list[AbsenceRecord] = []
+        confirmed: list[LogEvent] = []
 
         for trigger in triggers:
             response = self._find_response(trigger, spec)
@@ -325,7 +312,7 @@ class AbsenceCatalogBuilder:
 
     def _find_response(
         self, trigger: LogEvent, spec: SilencePairSpec
-    ) -> Optional[LogEvent]:
+    ) -> LogEvent | None:
         for event in self._events:
             if event.timestamp <= trigger.timestamp:
                 continue
@@ -344,7 +331,7 @@ class AbsenceCatalogBuilder:
         return None
 
     def _join_matches(
-        self, trigger: LogEvent, response: LogEvent, joins: List[CausalJoinSpec]
+        self, trigger: LogEvent, response: LogEvent, joins: list[CausalJoinSpec]
     ) -> bool:
         if not joins:
             return True
@@ -365,7 +352,7 @@ class AbsenceCatalogBuilder:
 
     def _build_search_space(
         self, trigger: LogEvent, spec: SilencePairSpec
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Return artifact IDs the agent must search to verify absence.
         Combines artifacts from the trigger event with any corpus IDs
@@ -374,7 +361,7 @@ class AbsenceCatalogBuilder:
         If search_space_selectors are declared in the spec, they take
         precedence and produce precise template-rendered entries.
         """
-        space: Set[str] = set()
+        space: set[str] = set()
 
         for val in trigger.artifact_ids.values():
             if isinstance(val, list):
@@ -413,7 +400,7 @@ class AbsenceCatalogBuilder:
         return sorted(space)
 
     def _match_filter(
-        self, event: LogEvent, match_field: Optional[str], match_value: Any
+        self, event: LogEvent, match_field: str | None, match_value: Any
     ) -> bool:
         if match_field is None:
             return True
@@ -444,16 +431,22 @@ class QuestionGenerator:
 
     def __init__(
         self,
-        events: List[LogEvent],
-        causal_links: List[CausalLink],
-        absence_records: List[AbsenceRecord],
-        confirmed_records: List[LogEvent],
+        events: list[LogEvent],
+        causal_links: list[CausalLink],
+        absence_records: list[AbsenceRecord],
+        confirmed_records: list[LogEvent],
         policy: AccessPolicy,
-        corpus: Optional[CorpusAdapter] = None,
+        corpus: CorpusAdapter | None = None,
         llm_fn=None,
-        perspective_actors: Optional[List[str]] = None,
-        perspective_config: Optional[PerspectiveConfig] = None,
-        trivial_search_space: Optional[Set[str]] = None,
+        perspective_actors: list[str] | None = None,
+        perspective_config: PerspectiveConfig | None = None,
+        trivial_search_space: set[str] | None = None,
+        max_perspective: int | None = None,
+        max_counterfactual: int | None = None,
+        max_silence: int | None = None,
+        easy_ratio: float = 0.34,
+        medium_ratio: float = 0.33,
+        hard_ratio: float = 0.33,
     ):
         self._events = sorted(events, key=lambda e: e.timestamp)
         self._links = causal_links
@@ -469,16 +462,61 @@ class QuestionGenerator:
             if trivial_search_space is not None
             else _TRIVIAL_SEARCH_SPACE
         )
+        if max_perspective is not None:
+            self.MAX_PERSPECTIVE = max_perspective
+        if max_counterfactual is not None:
+            self.MAX_COUNTERFACTUAL = max_counterfactual
+        if max_silence is not None:
+            self.MAX_SILENCE = max_silence
+        self._easy_ratio = easy_ratio
+        self._medium_ratio = medium_ratio
+        self._hard_ratio = hard_ratio
 
-    def generate(self) -> List[EvalQuestion]:
-        questions: List[EvalQuestion] = []
+    def generate(self) -> list[EvalQuestion]:
+        questions: list[EvalQuestion] = []
         questions.extend(self._perspective_questions())
         questions.extend(self._counterfactual_questions())
         questions.extend(self._silence_questions())
         random.shuffle(questions)
+
+        questions = self._enforce_difficulty_distribution(questions)
+
         return questions
 
-    def _perspective_questions(self) -> List[EvalQuestion]:
+    def _enforce_difficulty_distribution(
+        self, questions: list[EvalQuestion]
+    ) -> list[EvalQuestion]:
+        """Re-sample the question list to match the target difficulty ratios."""
+        if not questions:
+            return []
+
+        by_diff: dict[str, list[EvalQuestion]] = {"easy": [], "medium": [], "hard": []}
+        for q in questions:
+            by_diff.setdefault(q.difficulty, []).append(q)
+
+        total = len(questions)
+        n_easy = max(1, int(total * self._easy_ratio))
+        n_medium = max(1, int(total * self._medium_ratio))
+        n_hard = max(1, total - n_easy - n_medium)
+
+        result: list[EvalQuestion] = []
+        result.extend(random.sample(by_diff["easy"], min(n_easy, len(by_diff["easy"]))))
+        result.extend(
+            random.sample(by_diff["medium"], min(n_medium, len(by_diff["medium"])))
+        )
+        result.extend(random.sample(by_diff["hard"], min(n_hard, len(by_diff["hard"]))))
+
+        shortfall = total - len(result)
+        if shortfall > 0:
+            result_ids = {q.question_id for q in result}
+            remaining = [q for q in questions if q.question_id not in result_ids]
+            if remaining:
+                result.extend(random.sample(remaining, min(shortfall, len(remaining))))
+
+        random.shuffle(result)
+        return result
+
+    def _perspective_questions(self) -> list[EvalQuestion]:
         """
         Generate perspective questions with explicit balance across:
           - Positive: actor COULD have known
@@ -488,17 +526,16 @@ class QuestionGenerator:
         Enforces per-actor and per-event-type caps so the eval set reflects
         organizational breadth rather than one dominant actor or event type.
         """
-        questions: List[EvalQuestion] = []
+        questions: list[EvalQuestion] = []
         actors = self._perspective_actors or self._infer_actors()
         all_artifact_ids = self._corpus.list_ids() if self._corpus else []
 
-        positive: List[EvalQuestion] = []
-        neg_permission: List[EvalQuestion] = []
-        neg_temporal: List[EvalQuestion] = []
+        positive: list[EvalQuestion] = []
+        neg_permission: list[EvalQuestion] = []
+        neg_temporal: list[EvalQuestion] = []
 
-        # Track quotas
-        actor_counts: Dict[str, int] = defaultdict(int)
-        event_type_counts: Dict[str, int] = defaultdict(int)
+        actor_counts: dict[str, int] = defaultdict(int)
+        event_type_counts: dict[str, int] = defaultdict(int)
 
         for actor in actors:
             role = self._policy.role_for_actor(actor)
@@ -576,17 +613,17 @@ class QuestionGenerator:
         self,
         actor: str,
         role: str,
-        accessible: Set[str],
-        all_artifact_ids: List[str],
-        actor_counts: Dict[str, int],
-        event_type_counts: Dict[str, int],
-    ) -> Tuple[List[EvalQuestion], List[EvalQuestion], List[EvalQuestion]]:
+        accessible: set[str],
+        all_artifact_ids: list[str],
+        actor_counts: dict[str, int],
+        event_type_counts: dict[str, int],
+    ) -> tuple[list[EvalQuestion], list[EvalQuestion], list[EvalQuestion]]:
         """
         Returns (positive_qs, neg_permission_qs, neg_temporal_qs).
         """
-        positive: List[EvalQuestion] = []
-        neg_permission: List[EvalQuestion] = []
-        neg_temporal: List[EvalQuestion] = []
+        positive: list[EvalQuestion] = []
+        neg_permission: list[EvalQuestion] = []
+        neg_temporal: list[EvalQuestion] = []
 
         actor_events = [e for e in self._events if actor in e.actors]
         if not actor_events:
@@ -610,7 +647,6 @@ class QuestionGenerator:
             if not target_event.artifact_ids:
                 continue
 
-            # Enforce per-event-type cap
             if event_type_counts[target_event.type] >= _MAX_QUESTIONS_PER_EVENT_TYPE:
                 continue
 
@@ -708,12 +744,12 @@ class QuestionGenerator:
         role: str,
         as_of: str,
         target_event: LogEvent,
-        visible: Set[str],
-        accessible: Set[str],
+        visible: set[str],
+        accessible: set[str],
         could_know: bool,
         reason_type: str,
-    ) -> Optional[EvalQuestion]:
-        _blocked: Set[str] = set()
+    ) -> EvalQuestion | None:
+        _blocked: set[str] = set()
         for val in target_event.artifact_ids.values():
             aids = val if isinstance(val, list) else [val]
             for aid in aids:
@@ -782,7 +818,7 @@ class QuestionGenerator:
         as_of: str,
         target_event: LogEvent,
         could_know: bool,
-    ) -> Optional[str]:
+    ) -> str | None:
         event_desc = target_event.type.replace("_", " ")
         actors_str = (
             ", ".join(target_event.actors[:2]) if target_event.actors else "others"
@@ -832,11 +868,11 @@ class QuestionGenerator:
 
         return template
 
-    def _counterfactual_questions(self) -> List[EvalQuestion]:
-        questions: List[EvalQuestion] = []
+    def _counterfactual_questions(self) -> list[EvalQuestion]:
+        questions: list[EvalQuestion] = []
         all_artifact_ids = self._corpus.list_ids() if self._corpus else []
 
-        effect_cause_map: Dict[str, List[CausalLink]] = defaultdict(list)
+        effect_cause_map: dict[str, list[CausalLink]] = defaultdict(list)
         for link in self._links:
             effect_cause_map[link.effect_event_id].append(link)
 
@@ -844,10 +880,10 @@ class QuestionGenerator:
             self._links, min(self.MAX_COUNTERFACTUAL, len(self._links))
         )
 
-        actor_counts: Dict[str, int] = defaultdict(int)
-        event_type_counts: Dict[str, int] = defaultdict(int)
+        actor_counts: dict[str, int] = defaultdict(int)
+        event_type_counts: dict[str, int] = defaultdict(int)
 
-        seen_effects: Set[str] = set()
+        seen_effects: set[str] = set()
         for link in positive_candidates:
             if link.effect_event_id in seen_effects:
                 continue
@@ -879,9 +915,9 @@ class QuestionGenerator:
     def _build_counterfactual_question(
         self,
         link: CausalLink,
-        all_artifact_ids: List[str],
-        effect_cause_map: Dict[str, List[CausalLink]],
-    ) -> Optional[EvalQuestion]:
+        all_artifact_ids: list[str],
+        effect_cause_map: dict[str, list[CausalLink]],
+    ) -> EvalQuestion | None:
         question_text = self._prose_counterfactual(link)
         if not question_text:
             return None
@@ -904,8 +940,6 @@ class QuestionGenerator:
             if actor_role:
                 actor_subsystems = sorted(self._policy.subsystems_for_role(actor_role))
 
-        # A link is a negative counterfactual (outcome_changed=False) when the
-        # effect has multiple causes — removing one cause wouldn't stop the effect.
         is_multi_cause = len(effect_cause_map.get(link.effect_event_id, [])) >= 2
 
         ground_truth = {
@@ -950,7 +984,7 @@ class QuestionGenerator:
             expected_answer_schema=ANSWER_SCHEMAS["COUNTERFACTUAL"],
         )
 
-    def _prose_counterfactual(self, link: CausalLink) -> Optional[str]:
+    def _prose_counterfactual(self, link: CausalLink) -> str | None:
         cause_date = link.cause_timestamp[:10] if link.cause_timestamp else "that date"
         effect_date = (
             link.effect_timestamp[:10] if link.effect_timestamp else cause_date
@@ -1073,7 +1107,7 @@ class QuestionGenerator:
 
         return deterministic
 
-    def _silence_questions(self) -> List[EvalQuestion]:
+    def _silence_questions(self) -> list[EvalQuestion]:
         """
         Builds SILENCE questions with stratified sampling across trigger types.
 
@@ -1088,21 +1122,20 @@ class QuestionGenerator:
         target_false = self.MAX_SILENCE // 2
         target_true = self.MAX_SILENCE - target_false
 
-        # --- Stratified sampling for false (absence) questions ---
-        by_trigger: Dict[str, List[AbsenceRecord]] = defaultdict(list)
+        by_trigger: dict[str, list[AbsenceRecord]] = defaultdict(list)
         for record in self._absences:
             by_trigger[record.trigger_event_type].append(record)
 
         n_triggers = len(by_trigger)
         per_trigger = max(1, target_false // max(n_triggers, 1))
 
-        stratified: List[AbsenceRecord] = []
+        stratified: list[AbsenceRecord] = []
         for records in by_trigger.values():
             random.shuffle(records)
-            by_response: Dict[str, List[AbsenceRecord]] = defaultdict(list)
+            by_response: dict[str, list[AbsenceRecord]] = defaultdict(list)
             for r in records:
                 by_response[r.expected_response_type].append(r)
-            chosen: List[AbsenceRecord] = []
+            chosen: list[AbsenceRecord] = []
             response_groups = list(by_response.values())
             random.shuffle(response_groups)
             for group in response_groups:
@@ -1122,12 +1155,11 @@ class QuestionGenerator:
         random.shuffle(stratified)
         false_pool = stratified[: target_false + 5]
 
-        # --- Confirmed (true) questions ---
         confirmed_pool = list(self._confirmed)
         random.shuffle(confirmed_pool)
         confirmed_pool = confirmed_pool[: target_true + 5]
 
-        false_questions: List[EvalQuestion] = []
+        false_questions: list[EvalQuestion] = []
         for record in false_pool:
             if len(false_questions) >= target_false:
                 break
@@ -1135,7 +1167,7 @@ class QuestionGenerator:
             if q:
                 false_questions.append(q)
 
-        true_questions: List[EvalQuestion] = []
+        true_questions: list[EvalQuestion] = []
         for event in confirmed_pool:
             if len(true_questions) >= target_true:
                 break
@@ -1149,11 +1181,9 @@ class QuestionGenerator:
 
     def _build_silence_question(
         self, record: AbsenceRecord, expected_exists: bool
-    ) -> Optional[EvalQuestion]:
+    ) -> EvalQuestion | None:
         """Build a SILENCE question for a verified absence."""
-        # Skip questions where search space contains only generic subsystem names.
-        # An agent that answers "no" without checking specific artifacts scores 0
-        # on trajectory, so the question is uninformative if no real IDs exist.
+
         effective_space = [
             e
             for e in record.expected_search_space
@@ -1202,9 +1232,7 @@ class QuestionGenerator:
             expected_answer_schema=ANSWER_SCHEMAS["SILENCE"],
         )
 
-    def _build_silence_confirmed_question(
-        self, event: LogEvent
-    ) -> Optional[EvalQuestion]:
+    def _build_silence_confirmed_question(self, event: LogEvent) -> EvalQuestion | None:
         """Build a SILENCE question for a confirmed response (exists=True)."""
         question_text = self._prose_silence_confirmed(event)
         if not question_text:
@@ -1241,7 +1269,7 @@ class QuestionGenerator:
 
     def _prose_silence(
         self, record: AbsenceRecord, expected_exists: bool
-    ) -> Optional[str]:
+    ) -> str | None:
         response_label = record.expected_response_type.replace("_", " ")
         trigger_label = record.trigger_event_type.replace("_", " ")
 
@@ -1317,7 +1345,7 @@ class QuestionGenerator:
 
         return template
 
-    def _prose_silence_confirmed(self, event: LogEvent) -> Optional[str]:
+    def _prose_silence_confirmed(self, event: LogEvent) -> str | None:
         label = event.type.replace("_", " ")
         actors_str = (
             ", ".join(event.actors[:3]) if event.actors else "the involved parties"
@@ -1379,7 +1407,7 @@ class QuestionGenerator:
         text: str,
         ground_truth_str: str,
         question_type: str,
-        link: Optional[CausalLink] = None,
+        link: CausalLink | None = None,
     ) -> bool:
         """
         Validate LLM-generated question prose against a structured rubric.
@@ -1517,8 +1545,8 @@ class QuestionGenerator:
 
         return True
 
-    def _infer_actors(self) -> List[str]:
-        seen: Dict[str, int] = {}
+    def _infer_actors(self) -> list[str]:
+        seen: dict[str, int] = {}
         for event in self._events:
             for actor in event.actors:
                 seen[actor] = seen.get(actor, 0) + 1
@@ -1528,7 +1556,7 @@ class QuestionGenerator:
             if not a.startswith("system") and a
         ][:10]
 
-    def _artifact_subsystem(self, artifact_id: str) -> Optional[str]:
+    def _artifact_subsystem(self, artifact_id: str) -> str | None:
         if self._corpus:
             return self._corpus.subsystem_of(artifact_id)
         return None
@@ -1538,7 +1566,7 @@ class QuestionGenerator:
         digest = hashlib.md5(raw.encode()).hexdigest()[:8]
         return f"{prefix}_{digest}"
 
-    def _causal_link_contract(self, link: CausalLink) -> Dict[str, Any]:
+    def _causal_link_contract(self, link: CausalLink) -> dict[str, Any]:
         return {
             "link_type": link.link_type,
             "cause_event_id": link.cause_event_id,

@@ -1,0 +1,11 @@
+{
+  "id": "SEC-102",
+  "timestamp": "2026-03-04T06:45:00",
+  "subsystem": "jira",
+  "type": "security_incident",
+  "title": "PowerShell C2 \u2192 Ransomware Attempt on APP-SRV-14",
+  "status": "Resolved",
+  "severity": "critical",
+  "assignee": "fatima",
+  "body": "Cobalt Strike beacon detected on APP-SRV-14 after PowerShell download cradle. Ransomware encryption began but limited to 17 files before host isolation. Files restored from snapshot. C2 blocked at firewall. See postmortem CONF-302."
+}

@@ -1,0 +1,12 @@
+{
+  "id": "CONF-201",
+  "timestamp": "2026-03-05T11:00:00",
+  "subsystem": "confluence",
+  "type": "postmortem",
+  "title": "ESC-101 Postmortem: Checkout API Cache Invalidation",
+  "authors": [
+    "maria",
+    "james"
+  ],
+  "body": "Postmortem for the March 3 checkout-api outage. Root cause: Redis cluster cache invalidation bug introduced in v2.4.0. Fix: hotfix v2.4.1. Prevention: added cache integrity tests to CI pipeline."
+}

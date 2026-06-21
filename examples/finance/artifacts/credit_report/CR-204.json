@@ -1,0 +1,9 @@
+{
+  "id": "CR-204",
+  "timestamp": "2026-03-10T09:00:00",
+  "subsystem": "credit_report",
+  "applicant": "Patel",
+  "fico": 755,
+  "dti": 22,
+  "accounts": 10
+}

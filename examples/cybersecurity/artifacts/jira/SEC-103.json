@@ -1,0 +1,11 @@
+{
+  "id": "SEC-103",
+  "timestamp": "2026-03-05T11:10:00",
+  "subsystem": "jira",
+  "type": "security_incident",
+  "title": "VPN Brute Force \u2014 Low Priority",
+  "status": "Open",
+  "severity": "low",
+  "assignee": "chen",
+  "body": "847 failed logins from VPN exit node. No successful authentications. Likely automated scan. Monitoring for escalation."
+}

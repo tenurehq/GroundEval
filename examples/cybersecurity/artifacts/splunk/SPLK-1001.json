@@ -1,0 +1,9 @@
+{
+  "id": "SPLK-1001",
+  "timestamp": "2026-03-02T08:15:00",
+  "subsystem": "splunk",
+  "type": "alert",
+  "alert_name": "Suspicious Email with Attachment",
+  "severity": "high",
+  "raw": "From: hr-reminder@fake-domain.com To: jsmith@company.com Subject: Urgent: Benefits Enrollment. Attachment: Benefits_2026.zip (contains malicious macro). Detected by email security gateway, flagged as spear-phishing."
+}

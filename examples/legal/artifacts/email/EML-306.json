@@ -1,0 +1,9 @@
+{
+  "id": "EML-306",
+  "timestamp": "2026-03-04T14:00:00",
+  "subsystem": "email",
+  "from": "partner_kim",
+  "to": "compliance_wong",
+  "subject": "Weekly matter review",
+  "body": "CON-101 in redlines, CON-102 awaiting client, CON-103 negotiating. CON-101 needs DPA."
+}

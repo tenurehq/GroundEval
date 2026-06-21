@@ -1,0 +1,11 @@
+{
+  "id": "CRM-1002",
+  "timestamp": "2026-03-04T10:00:00",
+  "subsystem": "crm",
+  "type": "loan_application",
+  "applicant": "Anonymous",
+  "loan_amount": 420000,
+  "loan_type": "jumbo",
+  "purpose": "investment property",
+  "status": "denied \u2014 fraud"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "CS-501",
+  "timestamp": "2026-03-02T14:30:00",
+  "subsystem": "crowdstrike",
+  "type": "detection",
+  "hostname": "FIN-DT-07",
+  "detection_name": "CredentialDump_LSASS",
+  "severity": "high",
+  "details": "Process: lsass.exe accessed by unknown process. Technique: T1003.001 (OS Credential Dumping: LSASS Memory). User: jsmith. Detection triggered within 2 seconds of access."
+}

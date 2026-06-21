@@ -1,0 +1,9 @@
+{
+  "id": "SPLK-1006",
+  "timestamp": "2026-03-11T14:00:00",
+  "subsystem": "splunk",
+  "type": "alert",
+  "alert_name": "Malware Detected on Isolated Host",
+  "severity": "low",
+  "raw": "Host: TEST-VM-09. Detection: Generic.Malware.Sample@20260311. Host is a lab VM with no production access. Likely benign sample collection scenario."
+}

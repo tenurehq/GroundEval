@@ -8,8 +8,7 @@ The framework separates three concerns:
   2. AccessPolicy   — who can see what subsystem at what time
   3. EventLog       — the ground-truth bus (JSONL or any iterable of LogEvent)
 
-Everything else (question generation, gating, trajectory scoring, aggregation)
-is generic and lives in the other modules.
+
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ import json
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Protocol, Set, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 
 @dataclass
@@ -41,16 +40,16 @@ class LogEvent:
     id: str
     type: str
     timestamp: str
-    actors: List[str] = field(default_factory=list)
-    artifact_ids: Dict[str, Any] = field(default_factory=dict)
-    facts: Dict[str, Any] = field(default_factory=dict)
-    extras: Dict[str, Any] = field(default_factory=dict)
+    actors: list[str] = field(default_factory=list)
+    artifact_ids: dict[str, Any] = field(default_factory=dict)
+    facts: dict[str, Any] = field(default_factory=dict)
+    extras: dict[str, Any] = field(default_factory=dict)
 
     def ts(self) -> datetime:
         return datetime.fromisoformat(self.timestamp)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "LogEvent":
+    def from_dict(cls, d: dict) -> LogEvent:
         known = {"id", "type", "timestamp", "actors", "artifact_ids", "facts"}
         return cls(
             id=str(d.get("id", "")),
@@ -73,9 +72,9 @@ class LogEvent:
 @dataclass
 class ToolCall:
     tool_name: str
-    arguments: Dict[str, Any]
-    result_ids: List[str]
-    timestamp_applied: Optional[str]
+    arguments: dict[str, Any]
+    result_ids: list[str]
+    timestamp_applied: str | None
     horizon_violation: bool
     actor_gate_violation: bool
     subsystem_violation: bool
@@ -87,9 +86,9 @@ class ToolCall:
 class AgentTrajectory:
     question_id: str
     question_type: str
-    tool_calls: List[ToolCall] = field(default_factory=list)
-    cited_artifacts: List[str] = field(default_factory=list)
-    final_answer: Dict[str, Any] = field(default_factory=dict)
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    cited_artifacts: list[str] = field(default_factory=list)
+    final_answer: dict[str, Any] = field(default_factory=dict)
     total_latency_ms: float = 0.0
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -117,14 +116,14 @@ class CausalLink:
     effect_event_id: str
     effect_event_type: str
     effect_timestamp: str
-    actors: List[str]
+    actors: list[str]
     counterfactual_premise: str
     counterfactual_outcome: str
     outcome_changed: bool
-    evidence_artifact_ids: List[str] = field(default_factory=list)
-    cause_artifact_ids: List[str] = field(default_factory=list)
-    effect_artifact_ids: List[str] = field(default_factory=list)
-    mechanism_aliases: List[str] = field(default_factory=list)
+    evidence_artifact_ids: list[str] = field(default_factory=list)
+    cause_artifact_ids: list[str] = field(default_factory=list)
+    effect_artifact_ids: list[str] = field(default_factory=list)
+    mechanism_aliases: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -140,9 +139,9 @@ class AbsenceRecord:
     trigger_event_id: str
     trigger_event_type: str
     trigger_timestamp: str
-    trigger_actors: List[str]
+    trigger_actors: list[str]
     expected_response_type: str
-    expected_search_space: List[str]
+    expected_search_space: list[str]
     subsystem: str
 
     def to_dict(self) -> dict:
@@ -162,10 +161,10 @@ class SearchSpaceSelector:
     """
 
     subsystem: str
-    id_template: Optional[str] = None
-    query_template: Optional[str] = None
+    id_template: str | None = None
+    query_template: str | None = None
 
-    def render(self, trigger_event: LogEvent) -> Dict[str, Any]:
+    def render(self, trigger_event: LogEvent) -> dict[str, Any]:
         """
         Returns a runtime search request dict:
           {'mode': 'id', 'value': 'ENG-42'}   or
@@ -193,7 +192,7 @@ class SearchSpaceSelector:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "SearchSpaceSelector":
+    def from_dict(cls, d: dict) -> SearchSpaceSelector:
         return cls(
             subsystem=d["subsystem"],
             id_template=d.get("id_template"),
@@ -212,20 +211,20 @@ class EvalQuestion:
     question_type: Literal["PERSPECTIVE", "COUNTERFACTUAL", "SILENCE"]
     question_text: str
     difficulty: Literal["easy", "medium", "hard"]
-    ground_truth: Dict[str, Any]
+    ground_truth: dict[str, Any]
 
-    actor: Optional[str] = None
-    actor_role: Optional[str] = None
-    as_of_time: Optional[str] = None
-    actor_visible_artifacts: Optional[List[str]] = None
-    actor_subsystem_access: Optional[List[str]] = None
+    actor: str | None = None
+    actor_role: str | None = None
+    as_of_time: str | None = None
+    actor_visible_artifacts: list[str] | None = None
+    actor_subsystem_access: list[str] | None = None
     cross_subsystem: bool = False
 
-    causal_link: Optional[Dict[str, Any]] = None
+    causal_link: dict[str, Any] | None = None
 
-    expected_search_space: Optional[List[str]] = None
+    expected_search_space: list[str] | None = None
 
-    expected_answer_schema: Optional[Dict[str, Any]] = None
+    expected_answer_schema: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -244,9 +243,9 @@ class EvalResult:
     answer_correct: bool
     trajectory_score: float
     combined_score: float
-    failure_reason: Optional[str]
+    failure_reason: str | None
     tool_call_count: int
-    meta: Dict[str, Any] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -264,29 +263,29 @@ class CorpusAdapter(Protocol):
     Implement this protocol to plug in MongoDB, Elasticsearch, etc.
     """
 
-    def fetch(self, artifact_id: str, as_of: Optional[str] = None) -> Optional[dict]:
+    def fetch(self, artifact_id: str, as_of: str | None = None) -> dict | None:
         """Return artifact dict or None if not found / gated by timestamp."""
         ...
 
     def search(
         self,
         query: str,
-        artifact_type: Optional[str] = None,
-        as_of: Optional[str] = None,
+        artifact_type: str | None = None,
+        as_of: str | None = None,
         limit: int = 10,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """Full-text or keyword search. Return list of artifact dicts."""
         ...
 
-    def timestamp_of(self, artifact_id: str) -> Optional[str]:
+    def timestamp_of(self, artifact_id: str) -> str | None:
         """Return ISO timestamp of artifact creation, or None."""
         ...
 
-    def subsystem_of(self, artifact_id: str) -> Optional[str]:
+    def subsystem_of(self, artifact_id: str) -> str | None:
         """Return subsystem name for this artifact (e.g. 'email', 'jira')."""
         ...
 
-    def list_ids(self, subsystem: Optional[str] = None) -> List[str]:
+    def list_ids(self, subsystem: str | None = None) -> list[str]:
         """List all artifact IDs, optionally filtered by subsystem."""
         ...
 
@@ -307,21 +306,21 @@ class AccessPolicy(Protocol):
     Implement this protocol for more dynamic rules (e.g. per-project access).
     """
 
-    def subsystems_for_role(self, role: str) -> Set[str]:
+    def subsystems_for_role(self, role: str) -> set[str]:
         """Return set of subsystem names accessible to this role."""
         ...
 
-    def role_for_actor(self, actor_id: str) -> Optional[str]:
+    def role_for_actor(self, actor_id: str) -> str | None:
         """Return the role name for this actor, or None if unknown."""
         ...
 
     def visible_artifacts(
         self,
         actor_id: str,
-        all_artifact_ids: List[str],
-        as_of: Optional[str] = None,
-        corpus: Optional[CorpusAdapter] = None,
-    ) -> Set[str]:
+        all_artifact_ids: list[str],
+        as_of: str | None = None,
+        corpus: CorpusAdapter | None = None,
+    ) -> set[str]:
         """
         Return the subset of artifact IDs visible to this actor.
 
@@ -349,7 +348,7 @@ class CausalJoinSpec:
     effect: str
 
     @classmethod
-    def from_dict(cls, d: dict) -> "CausalJoinSpec":
+    def from_dict(cls, d: dict) -> CausalJoinSpec:
         return cls(cause=d["cause"], effect=d["effect"])
 
     def to_dict(self) -> dict:
@@ -386,15 +385,15 @@ class CausalLinkSpec:
     premise_template: str
     outcome_template: str
     outcome_changed: bool = True
-    match_field: Optional[str] = None
-    match_value: Optional[Any] = None
-    max_gap_days: Optional[float] = None
+    match_field: str | None = None
+    match_value: Any | None = None
+    max_gap_days: float | None = None
     link_field: str = "id"
-    join: List[CausalJoinSpec] = field(default_factory=list)
-    mechanism_aliases: List[str] = field(default_factory=list)
+    join: list[CausalJoinSpec] = field(default_factory=list)
+    mechanism_aliases: list[str] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "CausalLinkSpec":
+    def from_dict(cls, d: dict) -> CausalLinkSpec:
         join_raw = d.get("join", [])
         join = [
             CausalJoinSpec.from_dict(j) if isinstance(j, dict) else CausalJoinSpec(**j)
@@ -434,15 +433,15 @@ class SilencePairSpec:
 
     trigger_event_type: str
     response_event_type: str
-    search_space_subsystems: List[str] = field(default_factory=list)
-    search_space_selectors: List[SearchSpaceSelector] = field(default_factory=list)
-    max_gap_days: Optional[float] = None
-    match_field: Optional[str] = None
-    match_value: Optional[Any] = None
-    join: List[CausalJoinSpec] = field(default_factory=list)
+    search_space_subsystems: list[str] = field(default_factory=list)
+    search_space_selectors: list[SearchSpaceSelector] = field(default_factory=list)
+    max_gap_days: float | None = None
+    match_field: str | None = None
+    match_value: Any | None = None
+    join: list[CausalJoinSpec] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "SilencePairSpec":
+    def from_dict(cls, d: dict) -> SilencePairSpec:
         selectors_raw = d.get("search_space_selectors", d.get("search_space", []))
         selectors = [
             SearchSpaceSelector.from_dict(s) if isinstance(s, dict) else s
@@ -469,17 +468,16 @@ class SilencePairSpec:
 
 @dataclass
 class PerspectiveConfig:
-    """
-    Optional user-supplied overrides for perspective question generation.
-    """
-
     positive_ratio: float = 0.5
     negative_permission_ratio: float = 0.25
     negative_temporal_ratio: float = 0.25
     require_cross_subsystem_cases: bool = True
+    easy_ratio: float = 0.34
+    medium_ratio: float = 0.33
+    hard_ratio: float = 0.33
 
     @classmethod
-    def from_dict(cls, d: dict) -> "PerspectiveConfig":
+    def from_dict(cls, d: dict) -> PerspectiveConfig:
         return cls(
             positive_ratio=float(d.get("positive_ratio", 0.5)),
             negative_permission_ratio=float(d.get("negative_permission_ratio", 0.25)),
@@ -487,6 +485,9 @@ class PerspectiveConfig:
             require_cross_subsystem_cases=bool(
                 d.get("require_cross_subsystem_cases", True)
             ),
+            easy_ratio=float(d.get("easy_ratio", 0.34)),
+            medium_ratio=float(d.get("medium_ratio", 0.33)),
+            hard_ratio=float(d.get("hard_ratio", 0.33)),
         )
 
 
@@ -517,8 +518,8 @@ class GatedRuntime:
         corpus: CorpusAdapter,
         policy: AccessPolicy,
         question: EvalQuestion,
-        actor_visible_artifacts: Optional[Set[str]] = None,
-        actor_subsystem_access: Optional[Set[str]] = None,
+        actor_visible_artifacts: set[str] | None = None,
+        actor_subsystem_access: set[str] | None = None,
     ):
         self._corpus = corpus
         self._policy = policy
@@ -527,7 +528,7 @@ class GatedRuntime:
         self._as_of = question.as_of_time
         self._actor_visible = actor_visible_artifacts or set()
         self._actor_subsystems = actor_subsystem_access or set()
-        self._call_log: List[ToolCall] = []
+        self._call_log: list[ToolCall] = []
         self._trajectory = AgentTrajectory(
             question_id=question.question_id,
             question_type=question.question_type,
@@ -536,9 +537,15 @@ class GatedRuntime:
         if self._qtype == "SILENCE":
             self._as_of = None
 
+        self._all_subsystems: list[str] = []
+
     @property
-    def call_log(self) -> List[ToolCall]:
+    def call_log(self) -> list[ToolCall]:
         return list(self._call_log)
+
+    @property
+    def all_subsystems(self) -> list[str]:
+        return list(self._all_subsystems)
 
     def trajectory(self) -> AgentTrajectory:
         """Return the live trajectory populated so far."""
@@ -560,7 +567,7 @@ class GatedRuntime:
         t.dead_ends_recovered = recovered
         return t
 
-    def fetch(self, artifact_id: str) -> Optional[dict]:
+    def fetch(self, artifact_id: str) -> dict | None:
         """Return artifact dict or None if gated."""
         import time
 
@@ -579,8 +586,10 @@ class GatedRuntime:
             sub = self._corpus.subsystem_of(artifact_id)
             if self._actor_subsystems and sub and sub not in self._actor_subsystems:
                 sub_v = True
+                doc = None
             if self._actor_visible and artifact_id not in self._actor_visible:
                 actor_v = True
+                doc = None
 
         filtered = self._record(
             tool_name="fetch_artifact",
@@ -616,9 +625,9 @@ class GatedRuntime:
     def search(
         self,
         query: str,
-        artifact_type: Optional[str] = None,
+        artifact_type: str | None = None,
         limit: int = 10,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """Gated search — results are post-filtered by as_of and actor cone.
 
         Search results are stripped to metadata-only (id, type, title,
@@ -644,6 +653,20 @@ class GatedRuntime:
         if self._qtype == "PERSPECTIVE" and artifact_type:
             if self._actor_subsystems and artifact_type not in self._actor_subsystems:
                 sub_v = True
+                return self._record(
+                    tool_name="search_artifacts",
+                    arguments={
+                        "query": query,
+                        "artifact_type": artifact_type,
+                        "limit": limit,
+                    },
+                    results=[],
+                    t0=t0,
+                    horizon_violation=False,
+                    actor_gate_violation=False,
+                    subsystem_violation=sub_v,
+                    timestamp_applied=self._as_of,
+                )
 
         return self._record(
             tool_name="search_artifacts",
@@ -656,13 +679,13 @@ class GatedRuntime:
             timestamp_applied=self._as_of,
         )
 
-    def timestamp_of(self, artifact_id: str) -> Optional[str]:
+    def timestamp_of(self, artifact_id: str) -> str | None:
         return self._corpus.timestamp_of(artifact_id)
 
-    def subsystem_of(self, artifact_id: str) -> Optional[str]:
+    def subsystem_of(self, artifact_id: str) -> str | None:
         return self._corpus.subsystem_of(artifact_id)
 
-    def list_ids(self, subsystem: Optional[str] = None) -> List[str]:
+    def list_ids(self, subsystem: str | None = None) -> list[str]:
         if self._qtype == "PERSPECTIVE" and subsystem:
             if self._actor_subsystems and subsystem not in self._actor_subsystems:
                 return []
@@ -674,19 +697,19 @@ class GatedRuntime:
     def _record(
         self,
         tool_name: str,
-        arguments: Dict[str, Any],
-        results: List[dict],
+        arguments: dict[str, Any],
+        results: list[dict],
         t0: float,
         horizon_violation: bool = False,
         actor_gate_violation: bool = False,
         subsystem_violation: bool = False,
-        timestamp_applied: Optional[str] = None,
-    ) -> List[dict]:
+        timestamp_applied: str | None = None,
+    ) -> list[dict]:
         import time
 
         latency = (time.time() - t0) * 1000
 
-        filtered: List[dict] = []
+        filtered: list[dict] = []
         for r in results:
             doc_id = str(r.get("id", r.get("_id", "")))
             ts = r.get("timestamp") or r.get("created_at") or r.get("date", "")
@@ -753,7 +776,7 @@ def _get_nested(d: dict, dotted_path: str) -> Any:
     return cur
 
 
-def load_events(path: Path) -> List[LogEvent]:
+def load_events(path: Path) -> list[LogEvent]:
     """Load a JSONL event log. Each line must be a JSON object."""
     events = []
     with open(path) as f:
@@ -768,7 +791,7 @@ def load_events(path: Path) -> List[LogEvent]:
     return events
 
 
-ANSWER_SCHEMA_PERSPECTIVE: Dict[str, Any] = {
+ANSWER_SCHEMA_PERSPECTIVE: dict[str, Any] = {
     "type": "object",
     "required": [
         "could_actor_have_known",
@@ -784,7 +807,7 @@ ANSWER_SCHEMA_PERSPECTIVE: Dict[str, Any] = {
     },
 }
 
-ANSWER_SCHEMA_COUNTERFACTUAL: Dict[str, Any] = {
+ANSWER_SCHEMA_COUNTERFACTUAL: dict[str, Any] = {
     "type": "object",
     "required": [
         "outcome_changed",
@@ -828,7 +851,7 @@ ANSWER_SCHEMA_COUNTERFACTUAL: Dict[str, Any] = {
     },
 }
 
-ANSWER_SCHEMA_SILENCE: Dict[str, Any] = {
+ANSWER_SCHEMA_SILENCE: dict[str, Any] = {
     "type": "object",
     "required": ["exists", "answer", "reasoning"],
     "properties": {
@@ -838,7 +861,7 @@ ANSWER_SCHEMA_SILENCE: Dict[str, Any] = {
     },
 }
 
-ANSWER_SCHEMAS: Dict[str, Dict[str, Any]] = {
+ANSWER_SCHEMAS: dict[str, dict[str, Any]] = {
     "PERSPECTIVE": ANSWER_SCHEMA_PERSPECTIVE,
     "COUNTERFACTUAL": ANSWER_SCHEMA_COUNTERFACTUAL,
     "SILENCE": ANSWER_SCHEMA_SILENCE,

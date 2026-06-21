@@ -1,0 +1,11 @@
+{
+  "id": "SEC-106",
+  "timestamp": "2026-03-11T14:30:00",
+  "subsystem": "jira",
+  "type": "security_incident",
+  "title": "Malware Sample on Test VM",
+  "status": "Resolved",
+  "severity": "low",
+  "assignee": "fatima",
+  "body": "Generic malware detected on TEST-VM-09. Lab environment only, no production access. Snapshot and isolate. Sample submitted to sandbox for analysis."
+}

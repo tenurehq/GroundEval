@@ -82,7 +82,7 @@ def test_yaml_access_policy_visible_artifacts():
     assert policy.subsystems_for_role("engineer") == {"jira"}
 
     class MiniCorpus:
-        def subsystem_of(self, artifact_id: str) -> Optional[str]:
+        def subsystem_of(self, artifact_id: str) -> str | None:
             return {"j1": "jira", "s1": "slack"}.get(artifact_id)
 
     visible = policy.visible_artifacts("alice", ["j1", "s1"], corpus=MiniCorpus())
@@ -153,10 +153,10 @@ def test_event_log_policy_temporal_filter(monkeypatch):
     }
 
     class MinCorpus:
-        def timestamp_of(self, aid: str) -> Optional[str]:
+        def timestamp_of(self, aid: str) -> str | None:
             return "2026-01-05T00:00:00"
 
-        def subsystem_of(self, aid: str) -> Optional[str]:
+        def subsystem_of(self, aid: str) -> str | None:
             return "jira"
 
     policy = EventLogPolicy(config, events)

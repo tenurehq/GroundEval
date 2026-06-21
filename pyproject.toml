@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "groundeval"
 dynamic = ["version"]
 readme = "README.md"
-description = "Generalizable agentic evaluation framework for PERSPECTIVE, COUNTERFACTUAL, and SILENCE tracks."
+description = "Deterministic evaluation for agents that reason over state"
 requires-python = ">=3.13"
 dependencies = [
     "anthropic>=0.111.0",

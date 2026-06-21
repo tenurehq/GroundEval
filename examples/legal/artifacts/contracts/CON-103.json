@@ -1,0 +1,11 @@
+{
+  "id": "CON-103",
+  "timestamp": "2026-03-03T08:00:00",
+  "subsystem": "contracts",
+  "matter": "Gamma-MA-2026",
+  "type": "Merger Agreement",
+  "client": "Gamma Holdings",
+  "counterparty": "Delta Corp",
+  "status": "Executed v2.0",
+  "has_dpa": true
+}

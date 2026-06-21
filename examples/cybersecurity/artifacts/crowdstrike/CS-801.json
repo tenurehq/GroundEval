@@ -1,0 +1,9 @@
+{
+  "id": "CS-801",
+  "timestamp": "2026-03-09T07:00:00",
+  "subsystem": "crowdstrike",
+  "type": "ioc_set",
+  "source": "ISAC Bulletin 2026-031",
+  "threat_actor": "APT-Orange",
+  "details": "12 IOCs received from ISAC. Includes 5 IP addresses, 4 domain names, 3 file hashes. Retrospective hunt run against 90 days of data. No matches found."
+}

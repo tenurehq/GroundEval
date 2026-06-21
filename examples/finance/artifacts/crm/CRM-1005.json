@@ -1,0 +1,11 @@
+{
+  "id": "CRM-1005",
+  "timestamp": "2026-03-13T09:00:00",
+  "subsystem": "crm",
+  "type": "loan_application",
+  "applicant": "Nguyen",
+  "loan_amount": 350000,
+  "loan_type": "jumbo",
+  "purpose": "home purchase",
+  "status": "denied \u2014 credit/DTI"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "MSG-401",
+  "timestamp": "2026-03-02T15:00:00",
+  "subsystem": "secure_messages",
+  "sender": "coordinator_nguyen",
+  "recipient": "dr_chen",
+  "subject": "Maria Gonzales \u2014 follow-up plan",
+  "body": "Cardiology consult scheduled for tomorrow. Will coordinate discharge planning for 3/4."
+}

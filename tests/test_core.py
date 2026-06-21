@@ -27,7 +27,7 @@ class DummyCorpus:
     def __init__(self, docs: dict):
         self.docs = docs
 
-    def fetch(self, artifact_id: str, as_of: Optional[str] = None) -> Optional[dict]:
+    def fetch(self, artifact_id: str, as_of: str | None = None) -> dict | None:
         doc = self.docs.get(artifact_id)
         if doc is None:
             return None
@@ -48,32 +48,32 @@ class DummyCorpus:
                 break
         return results
 
-    def timestamp_of(self, artifact_id: str) -> Optional[str]:
+    def timestamp_of(self, artifact_id: str) -> str | None:
         return self.docs.get(artifact_id, {}).get("timestamp")
 
-    def subsystem_of(self, artifact_id: str) -> Optional[str]:
+    def subsystem_of(self, artifact_id: str) -> str | None:
         return self.docs.get(artifact_id, {}).get("subsystem")
 
-    def list_ids(self, subsystem: Optional[str] = None) -> List[str]:
+    def list_ids(self, subsystem: str | None = None) -> list[str]:
         if not subsystem:
             return list(self.docs.keys())
         return [k for k, v in self.docs.items() if v.get("subsystem") == subsystem]
 
 
 class DummyPolicy:
-    def subsystems_for_role(self, role: str) -> Set[str]:
+    def subsystems_for_role(self, role: str) -> set[str]:
         return {"jira", "slack"}
 
-    def role_for_actor(self, actor_id: str) -> Optional[str]:
+    def role_for_actor(self, actor_id: str) -> str | None:
         return "engineer" if actor_id == "alice" else None
 
     def visible_artifacts(
         self,
         actor_id: str,
-        all_artifact_ids: List[str],
-        as_of: Optional[str] = None,
-        corpus: Optional[CorpusAdapter] = None,
-    ) -> Set[str]:
+        all_artifact_ids: list[str],
+        as_of: str | None = None,
+        corpus: CorpusAdapter | None = None,
+    ) -> set[str]:
         return {"email-001", "jira-42"}
 
 

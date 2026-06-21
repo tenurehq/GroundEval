@@ -2,17 +2,13 @@
 groundeval/scorers.py
 ==========================
 Answer and trajectory scorers for all three tracks.
-
-These are identical in structure to the OrgForge agentic_eval_harness scorers
-but contain zero domain-specific logic. All mechanism aliases and subsystem
-names come from the question's ground_truth dict, not hardcoded constants.
 """
 
 from __future__ import annotations
 
 import logging
 from statistics import mean
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from .core import AgentTrajectory, EvalResult, EvalQuestion
 
@@ -44,8 +40,8 @@ def _violation_adjusted(combined: float, violation_rate: float) -> float:
 
 class PerspectiveScorer:
     def score_answer(
-        self, final_answer: Dict, ground_truth: Dict
-    ) -> Tuple[float, bool]:
+        self, final_answer: dict, ground_truth: dict
+    ) -> tuple[float, bool]:
         if not final_answer:
             return 0.0, False
 
@@ -123,7 +119,7 @@ class PerspectiveScorer:
         return round(composite, 4)
 
     def _score_citation_discipline(
-        self, cited: Set[str], question: EvalQuestion
+        self, cited: set[str], question: EvalQuestion
     ) -> float:
         """Context-injection mode: penalize citations outside visibility cone."""
         visible = set(question.actor_visible_artifacts or [])
@@ -141,7 +137,7 @@ class PerspectiveScorer:
         )
         return round(0.5 * discipline + 0.5 * grounding, 4)
 
-    def _extract_bool(self, d: Dict, key: str) -> Optional[bool]:
+    def _extract_bool(self, d: dict, key: str) -> bool | None:
         val = d.get(key)
         if isinstance(val, bool):
             return val
@@ -156,8 +152,8 @@ class PerspectiveScorer:
 
 class CounterfactualScorer:
     def score_answer(
-        self, final_answer: Dict, ground_truth: Dict
-    ) -> Tuple[float, bool]:
+        self, final_answer: dict, ground_truth: dict
+    ) -> tuple[float, bool]:
         if not final_answer:
             return 0.0, False
 
@@ -242,7 +238,7 @@ class CounterfactualScorer:
             link.get("evidence_artifact_ids") or gt.get("evidence_artifacts", [])
         )
 
-        retrieved_ids: Set[str] = set()
+        retrieved_ids: set[str] = set()
         for call in calls:
             retrieved_ids.update(call.result_ids)
         retrieved_ids.update(cited)
@@ -284,7 +280,7 @@ class CounterfactualScorer:
         )
         return round(composite, 4)
 
-    def _extract_bool(self, d: Dict, key: str) -> Optional[bool]:
+    def _extract_bool(self, d: dict, key: str) -> bool | None:
         val = d.get(key)
 
         if isinstance(val, bool):
@@ -300,7 +296,7 @@ class CounterfactualScorer:
         logger.warning(f"COUNTERFACTUAL: '{key}' missing or non-boolean (got {val!r})")
         return None
 
-    def _mechanism_matches(self, final_answer: Dict, ground_truth: Dict) -> bool:
+    def _mechanism_matches(self, final_answer: dict, ground_truth: dict) -> bool:
         """
         Deterministic mechanism match.
 
@@ -329,7 +325,7 @@ class CounterfactualScorer:
         """
         return str(value).strip().lower().replace("-", "_").replace(" ", "_")
 
-    def _as_string_set(self, value: Any) -> Set[str]:
+    def _as_string_set(self, value: Any) -> set[str]:
         if isinstance(value, list):
             return {str(v) for v in value if v is not None}
         if isinstance(value, set):
@@ -343,8 +339,8 @@ class CounterfactualScorer:
 
 class SilenceScorer:
     def score_answer(
-        self, final_answer: Dict, ground_truth: Dict
-    ) -> Tuple[float, bool]:
+        self, final_answer: dict, ground_truth: dict
+    ) -> tuple[float, bool]:
         if not final_answer:
             return 0.0, False
 
@@ -371,7 +367,7 @@ class SilenceScorer:
 
         expected = set(question.expected_search_space or [])
 
-        retrieved_ids: Set[str] = set()
+        retrieved_ids: set[str] = set()
         for call in calls:
             retrieved_ids.update(call.result_ids)
         retrieved_ids.update(cited)
@@ -396,7 +392,7 @@ class SilenceScorer:
         )
         return round(composite, 4)
 
-    def _extract_bool(self, d: Dict) -> Optional[bool]:
+    def _extract_bool(self, d: dict) -> bool | None:
         for key in ("exists", "found", "answer"):
             val = d.get(key)
             if isinstance(val, bool):
@@ -418,7 +414,7 @@ def combine_scores(
     return round(w["answer"] * answer_score + w["trajectory"] * trajectory_score, 4)
 
 
-def _trajectory_diagnostics(rs: List[EvalResult]) -> Dict[str, Any]:
+def _trajectory_diagnostics(rs: list[EvalResult]) -> dict[str, Any]:
     """Cross-tabulation of answer correctness against trajectory quality."""
     if not rs:
         return {
@@ -453,12 +449,12 @@ def _trajectory_diagnostics(rs: List[EvalResult]) -> Dict[str, Any]:
     }
 
 
-def aggregate(results: List[EvalResult]) -> Dict[str, Any]:
+def aggregate(results: list[EvalResult]) -> dict[str, Any]:
     if not results:
         return {}
 
-    by_type: Dict[str, List[EvalResult]] = {}
-    by_difficulty: Dict[str, List[EvalResult]] = {}
+    by_type: dict[str, list[EvalResult]] = {}
+    by_difficulty: dict[str, list[EvalResult]] = {}
 
     for r in results:
         by_type.setdefault(r.question_type, []).append(r)
@@ -471,7 +467,7 @@ def aggregate(results: List[EvalResult]) -> Dict[str, Any]:
         violation_rate = total_violations / total_calls if total_calls else 0.0
         base_combined = mean([r.combined_score for r in rs])
 
-        summary: Dict[str, Any] = {
+        summary: dict[str, Any] = {
             "n": len(rs),
             "answer_score": round(mean([r.answer_score for r in rs]), 4),
             "trajectory_score": round(mean([r.trajectory_score for r in rs]), 4),

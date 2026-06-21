@@ -1,0 +1,10 @@
+{
+  "id": "ZD-540",
+  "timestamp": "2026-03-17T08:00:00",
+  "subsystem": "zendesk",
+  "type": "ticket",
+  "customer": "Cyberdyne",
+  "priority": "high",
+  "title": "Authentication failures across all users",
+  "body": "Cyberdyne reports all users unable to log in since 07:30 UTC. Possible security incident. Critical."
+}

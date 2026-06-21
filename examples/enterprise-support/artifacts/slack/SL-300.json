@@ -1,0 +1,8 @@
+{
+  "id": "SL-300",
+  "timestamp": "2026-03-01T08:00:00",
+  "subsystem": "slack",
+  "channel": "general",
+  "sender": "maria",
+  "text": "Q1 planning: let's improve incident response times. Target: 15min detection, 60min resolution for sev1."
+}

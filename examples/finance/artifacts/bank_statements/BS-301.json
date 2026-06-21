@@ -1,0 +1,9 @@
+{
+  "id": "BS-301",
+  "timestamp": "2026-03-01T10:00:00",
+  "subsystem": "bank_statements",
+  "applicant": "Johnson",
+  "account_type": "checking",
+  "avg_balance": 18500,
+  "months": 3
+}

@@ -161,7 +161,7 @@ def test_counterfactual_trajectory_evidence_coverage():
         },
     )
     score = scorer.score_trajectory(traj, q)
-    assert score == pytest.approx(0.9167, abs=1e-3)
+    assert score == pytest.approx(0.7833, abs=1e-3)
 
 
 def test_silence_answer_correct_exists_true():
@@ -202,7 +202,7 @@ def test_silence_trajectory_search_coverage():
         expected_search_space=["S1", "S2", "S3"],
     )
     score = scorer.score_trajectory(traj, q)
-    assert score == pytest.approx(0.8333, abs=1e-3)
+    assert score == pytest.approx(0.7333, abs=1e-3)
 
 
 def test_combine_scores_weights():

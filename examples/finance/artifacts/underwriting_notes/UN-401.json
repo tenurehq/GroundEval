@@ -1,0 +1,8 @@
+{
+  "id": "UN-401",
+  "timestamp": "2026-03-02T08:00:00",
+  "subsystem": "underwriting_notes",
+  "application": "CRM-1001",
+  "underwriter": "Garcia",
+  "notes": "Clean file. FICO 720, DTI 34. Income verified at $95K. Recommend approve with standard conditions."
+}

@@ -14,9 +14,6 @@ TWO DISTINCT USES
    - Called via provider.run_agent(question, context, runtime, max_steps)
    - Returns (AgentTrajectory, dict)
 
-These are separated because Anthropic and OpenAI have different tool call
-wire formats, different structured output mechanisms, and different ways of
-signalling "I am done and here is my answer".
 
 ANTHROPIC IMPLEMENTATION NOTES
 -------------------------------
@@ -62,32 +59,18 @@ mirroring the OrgForge harness pattern:
 `budget_exceeded` is set on the trajectory when the loop exhausts
 `max_steps` without `answer_submitted` being true.
 
-CONFIG (in config.yaml or passed directly)
-------------------------------------------
-    provider: anthropic          # or: openai
-    model: claude-sonnet-4-6     # any model string accepted by the provider
-    api_key: sk-...              # optional; falls back to env var
-    max_tokens: 1024
-    temperature: 0.0             # 0.0 for reproducibility
-
-For the generate command (prose only), set:
-    llm_question_prose: true
-    provider: anthropic
-    llm_model: claude-sonnet-4-6
-
-For the eval command, the provider drives the full agent loop.
-Set --model on the CLI or model: in config.yaml.
 """
 
 from __future__ import annotations
 
 import copy
+from enum import Enum
 import json
 import logging
 import os
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, cast
 
 from .core import (
     AgentTrajectory,
@@ -182,7 +165,86 @@ _TOOLS_OPENAI_BASE = [
 ]
 
 
-def _to_strict_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
+def _build_tools_for_corpus(
+    subsystems: list[str],
+) -> list[dict]:
+    """Build fetch_artifact and search_artifacts tool definitions with the
+    actual subsystem list from the corpus baked into artifact_type's enum."""
+    valid_subsystems = sorted(set(s for s in subsystems if s))
+    enum_desc = (
+        f"Must be one of: {', '.join(valid_subsystems)}."
+        if valid_subsystems
+        else "No subsystems available."
+    )
+
+    return [
+        {
+            "name": "fetch_artifact",
+            "description": (
+                "Retrieve a single artifact by its ID. "
+                "Returns the artifact dict or null if not found or gated."
+            ),
+            "input_schema": {
+                "type": "object",
+                "required": ["artifact_id"],
+                "properties": {
+                    "artifact_id": {
+                        "type": "string",
+                        "description": "The artifact ID to fetch.",
+                    }
+                },
+            },
+        },
+        {
+            "name": "search_artifacts",
+            "description": (
+                "Full-text search over the artifact corpus. "
+                "Returns a list of matching artifact dicts. "
+                "You MUST specify the subsystem to search within."
+            ),
+            "input_schema": {
+                "type": "object",
+                "required": ["query", "artifact_type"],
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search terms or artifact ID.",
+                    },
+                    "artifact_type": {
+                        "type": "string",
+                        "enum": valid_subsystems,
+                        "description": (
+                            f"REQUIRED. The subsystem to search within. {enum_desc}"
+                        ),
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results (default 10, max 50).",
+                        "default": 10,
+                    },
+                },
+            },
+        },
+    ]
+
+
+def _build_openai_tools(subsystems: list[str]) -> list[dict]:
+    """Build OpenAI-compatible tool definitions with dynamic subsystem enum."""
+    tools = _build_tools_for_corpus(subsystems)
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t["description"],
+                "parameters": t["input_schema"],
+            },
+        }
+        for t in tools
+    ]
+
+
+def _to_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """
     Compile an ANSWER_SCHEMAS-style JSON Schema into a strict-tool-use
     compliant schema.
@@ -212,7 +274,7 @@ def _to_strict_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
     return compiled
 
 
-def _build_submit_answer_tool(question: EvalQuestion) -> Dict[str, Any]:
+def _build_submit_answer_tool(question: EvalQuestion) -> dict[str, Any]:
     """
     Build the submit_answer tool definition for this question, with
     strict: true so the `answer` field is guaranteed to match the
@@ -248,7 +310,7 @@ class ModelProvider(ABC):
     The two methods to implement are complete() and run_agent().
     """
 
-    def __init__(self, model: str, api_key: Optional[str] = None, **kwargs):
+    def __init__(self, model: str, api_key: str | None = None, **kwargs):
         self.model = model
         self.api_key = api_key
         self.temperature = float(kwargs.get("temperature", 0.0))
@@ -266,10 +328,10 @@ class ModelProvider(ABC):
     def run_agent(
         self,
         question: EvalQuestion,
-        context: Optional[str],
-        runtime: Optional[GatedRuntime],
+        context: str | None,
+        runtime: GatedRuntime | None,
         max_steps: int = 5,
-    ) -> Tuple[AgentTrajectory, Dict[str, Any]]:
+    ) -> tuple[AgentTrajectory, dict[str, Any]]:
         """
         Run the agent loop against a single question.
 
@@ -284,7 +346,7 @@ class ModelProvider(ABC):
         ...
 
     @classmethod
-    def from_config(cls, cfg: dict) -> "ModelProvider":
+    def from_config(cls, cfg: dict) -> ModelProvider:
         """Build the right provider from a config dict."""
         provider_name = cfg.get("provider", "anthropic").lower()
         model = cfg.get("model", None)
@@ -316,6 +378,14 @@ class ModelProvider(ABC):
                 api_key=api_key,
                 **kwargs,
             )
+        elif "provider_path" in cfg:
+            import importlib
+
+            path = cfg["provider_path"]
+            module_path, class_name = path.rsplit(".", 1)
+            mod = importlib.import_module(module_path)
+            provider_cls = getattr(mod, class_name)
+            return provider_cls.from_config(cfg)
         else:
             raise ValueError(
                 f"Unknown provider '{provider_name}'. Supported: anthropic, openai"
@@ -323,7 +393,7 @@ class ModelProvider(ABC):
 
 
 def _build_system_prompt(
-    question: EvalQuestion, context: Optional[str], max_steps: int = 5
+    question: EvalQuestion, context: str | None, max_steps: int = 5
 ) -> str:
     schema = question.expected_answer_schema or ANSWER_SCHEMAS.get(
         question.question_type, {}
@@ -358,22 +428,20 @@ def _build_system_prompt(
             "relevant information before submitting your answer."
         )
 
-    # ── Step budget ─────────────────────────────────────────────────────
     parts.append(
         f"\n\nYou have at most {max_steps} turns to research. "
         "On your final turn, you MUST call submit_answer with whatever "
         "you have found. Do not call fetch_artifact or search_artifacts "
         "on your last turn."
     )
-    # ─────────────────────────────────────────────────────────────────────
 
     return "\n".join(parts)
 
 
 def _dispatch_tool(
     tool_name: str,
-    tool_input: Dict[str, Any],
-    runtime: Optional[GatedRuntime],
+    tool_input: dict[str, Any],
+    runtime: GatedRuntime | None,
 ) -> Any:
     """Execute a tool call against the GatedRuntime and return the result."""
     if tool_name == "submit_answer":
@@ -416,12 +484,9 @@ class AnthropicProvider(ModelProvider):
     Last-step forcing: on the final turn, the tool runner is rebuilt with
     only submit_answer available and a user message instructs the model
     this is its last turn.
-
-    Requires: pip install anthropic
-    API key:  ANTHROPIC_API_KEY env var, or api_key in config.
     """
 
-    def __init__(self, model: str, api_key: Optional[str] = None, **kwargs):
+    def __init__(self, model: str, api_key: str | None = None, **kwargs):
         super().__init__(model, api_key, **kwargs)
         try:
             import anthropic as _anthropic
@@ -447,19 +512,29 @@ class AnthropicProvider(ModelProvider):
     def run_agent(
         self,
         question: EvalQuestion,
-        context: Optional[str],
-        runtime: Optional[GatedRuntime],
+        context: str | None,
+        runtime: GatedRuntime | None,
         max_steps: int = 5,
-    ) -> Tuple[AgentTrajectory, Dict[str, Any]]:
+    ) -> tuple[AgentTrajectory, dict[str, Any]]:
         trajectory = AgentTrajectory(
             question_id=question.question_id,
             question_type=question.question_type,
         )
 
         system = _build_system_prompt(question, context, max_steps)
-        messages: List[Dict[str, Any]] = [
+        messages: list[dict[str, Any]] = [
             {"role": "user", "content": question.question_text}
         ]
+
+        subsystem_list = runtime.all_subsystems if runtime is not None else []
+
+        mapping = {}
+        for s in subsystem_list:
+            key = s.upper().replace("-", "_").replace(".", "_")
+            while key in mapping:
+                key = key + "_"
+            mapping[key] = s
+        ArtifactType = Enum("ArtifactType", mapping or {"__NONE__": "__none__"})
 
         beta_tool = self._anthropic.beta_tool
 
@@ -483,7 +558,7 @@ class AnthropicProvider(ModelProvider):
 
         @beta_tool
         def search_artifacts(
-            query: str, artifact_type: Optional[str] = None, limit: int = 10
+            query: str, artifact_type: ArtifactType, limit: int = 10
         ) -> str:
             """Full-text search over the artifact corpus.
 
@@ -496,17 +571,21 @@ class AnthropicProvider(ModelProvider):
             """
             if runtime is None:
                 return json.dumps({"error": "No runtime available for tool calls"})
-            results = runtime.search(
-                query=query, artifact_type=artifact_type, limit=int(limit)
+
+            at: str = (
+                artifact_type.value
+                if hasattr(artifact_type, "value")
+                else str(artifact_type)
             )
+            results = runtime.search(query=query, artifact_type=at, limit=int(limit))
             return json.dumps(results, default=str)
 
         submit_answer_def = _build_submit_answer_tool(question)
-        tools: List[Any] = [submit_answer_def]
+        tools: list[Any] = [submit_answer_def]
         if runtime is not None:
             tools = [fetch_artifact, search_artifacts, submit_answer_def]
 
-        final_answer: Dict[str, Any] = {}
+        final_answer: dict[str, Any] = {}
         answer_submitted = False
         t_start = time.time()
         prompt_tokens = 0
@@ -526,10 +605,6 @@ class AnthropicProvider(ModelProvider):
             for response in runner:
                 step += 1
 
-                # ── Last-step forced answer ──────────────────────────────
-                # On the final turn, rebuild the runner with only
-                # submit_answer available and inject a user message
-                # instructing the model this is its last turn.
                 if step == max_steps and not answer_submitted:
                     tools = [submit_answer_def]
                     messages.append({
@@ -550,7 +625,6 @@ class AnthropicProvider(ModelProvider):
                         messages=cast(Any, messages),
                     )
                     continue
-                # ───────────────────────────────────────────────────────
 
                 if response.usage:
                     prompt_tokens += response.usage.input_tokens
@@ -594,7 +668,7 @@ class OpenAIProvider(ModelProvider):
     API key:  OPENAI_API_KEY env var, or api_key in config.
     """
 
-    def __init__(self, model: str, api_key: Optional[str] = None, **kwargs):
+    def __init__(self, model: str, api_key: str | None = None, **kwargs):
         super().__init__(model, api_key, **kwargs)
         try:
             from openai import OpenAI
@@ -607,7 +681,6 @@ class OpenAIProvider(ModelProvider):
         except ImportError:
             raise ImportError("openai package not installed. Run: pip install openai")
 
-        # Detect model family for tool_choice behavior on last step.
         self._base_url = kwargs.get("base_url", "")
         self._model_lower = self.model.lower()
 
@@ -640,8 +713,6 @@ class OpenAIProvider(ModelProvider):
             messages=[{"role": "user", "content": prompt}],
         )
 
-        print(f"[OpenAI Response] - {response}")
-
         choice = response.choices[0]
         content = choice.message.content or ""
         if not content:
@@ -656,17 +727,17 @@ class OpenAIProvider(ModelProvider):
     def run_agent(
         self,
         question: EvalQuestion,
-        context: Optional[str],
-        runtime: Optional[GatedRuntime],
+        context: str | None,
+        runtime: GatedRuntime | None,
         max_steps: int = 5,
-    ) -> Tuple[AgentTrajectory, Dict[str, Any]]:
+    ) -> tuple[AgentTrajectory, dict[str, Any]]:
         trajectory = AgentTrajectory(
             question_id=question.question_id,
             question_type=question.question_type,
         )
 
         system = _build_system_prompt(question, context, max_steps)
-        messages: List[Dict[str, Any]] = [
+        messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
             {"role": "user", "content": question.question_text},
         ]
@@ -695,24 +766,80 @@ class OpenAIProvider(ModelProvider):
             },
         }
 
-        tools = (
-            _TOOLS_OPENAI_BASE + [submit_answer_tool]
-            if runtime is not None
-            else [submit_answer_tool]
-        )
+        if runtime is not None:
+            subsystem_list = (
+                runtime.all_subsystems if hasattr(runtime, "all_subsystems") else []
+            )
+            valid_subsystems = sorted(set(s for s in subsystem_list if s))
+            dynamic_base = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "fetch_artifact",
+                        "description": (
+                            "Retrieve a single artifact by its ID. "
+                            "Returns the artifact dict or null if not found or gated."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "required": ["artifact_id"],
+                            "properties": {
+                                "artifact_id": {
+                                    "type": "string",
+                                    "description": "The artifact ID to fetch.",
+                                }
+                            },
+                        },
+                    },
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "search_artifacts",
+                        "description": (
+                            "Full-text search over the artifact corpus. "
+                            "Returns a list of matching artifact dicts. "
+                            "You MUST specify the subsystem to search within."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "required": ["query", "artifact_type"],
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "Search terms or artifact ID.",
+                                },
+                                "artifact_type": {
+                                    "type": "string",
+                                    "enum": valid_subsystems,
+                                    "description": (
+                                        f"REQUIRED. The subsystem to search within. "
+                                        f"Must be one of: {', '.join(valid_subsystems)}."
+                                        if valid_subsystems
+                                        else "No subsystems available."
+                                    ),
+                                },
+                                "limit": {
+                                    "type": "integer",
+                                    "description": "Max results (default 10, max 50).",
+                                    "default": 10,
+                                },
+                            },
+                        },
+                    },
+                },
+            ]
+            tools = dynamic_base + [submit_answer_tool]
+        else:
+            tools = [submit_answer_tool]
 
-        final_answer: Dict[str, Any] = {}
+        final_answer: dict[str, Any] = {}
         t_start = time.time()
         prompt_tokens = 0
         completion_tokens = 0
         budget_exceeded = False
 
         for step in range(max_steps):
-            # ── Last-step forced answer ──────────────────────────────────
-            # Model-specific tool_choice:
-            # - Native OpenAI: "auto" with single tool works
-            # - Mistral/Qwen/Llama/Ollama: need "required" to force a tool
-            #   call when only one tool is available.
             current_tools = tools
             current_tool_choice: Any = "auto"
 
@@ -734,8 +861,6 @@ class OpenAIProvider(ModelProvider):
                     "type": "function",
                     "function": {"name": "submit_answer"},
                 }
-                # else: native OpenAI/Azure OpenAI — "auto" with single tool is fine
-            # ───────────────────────────────────────────────────────────────
 
             try:
                 response = self._client.chat.completions.create(
@@ -754,12 +879,6 @@ class OpenAIProvider(ModelProvider):
             if response.usage:
                 prompt_tokens += response.usage.prompt_tokens
                 completion_tokens += response.usage.completion_tokens
-
-            print(
-                f"[Token Usage] - prompt_tokens: {prompt_tokens} | completion_tokens: {completion_tokens}"
-            )
-
-            print(f"[OpenAI Response] - {response}")
 
             choice = response.choices[0]
             msg = choice.message
@@ -804,7 +923,6 @@ class OpenAIProvider(ModelProvider):
 
             time.sleep(3)
         else:
-            # Loop exhausted — budget exceeded.
             budget_exceeded = True
 
         trajectory.total_latency_ms = (time.time() - t_start) * 1000
@@ -815,7 +933,7 @@ class OpenAIProvider(ModelProvider):
         return trajectory, final_answer
 
 
-def _extract_json_from_text(text: str) -> Dict[str, Any]:
+def _extract_json_from_text(text: str) -> dict[str, Any]:
     """
     Last-resort extraction of a JSON object from free-form model output.
     Looks for the last {...} block in the text.

@@ -1,0 +1,9 @@
+{
+  "id": "MSG-403",
+  "timestamp": "2026-03-03T14:30:00",
+  "subsystem": "secure_messages",
+  "sender": "nurse_patel",
+  "recipient": "dr_chen",
+  "subject": "RE: James Okonkwo medication error",
+  "body": "Root cause analysis: pharmacy label misread at bedside. Dose-check barcode workflow initiated. Incident report filed."
+}

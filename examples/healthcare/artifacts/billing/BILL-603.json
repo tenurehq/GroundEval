@@ -1,0 +1,13 @@
+{
+  "id": "BILL-603",
+  "timestamp": "2026-03-14T11:00:00",
+  "subsystem": "billing",
+  "type": "claim",
+  "patient": "Robert Chen",
+  "codes": [
+    "99291",
+    "61314"
+  ],
+  "total": "$18,400.00",
+  "status": "submitted"
+}

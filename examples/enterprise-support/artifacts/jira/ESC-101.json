@@ -1,0 +1,10 @@
+{
+  "id": "ESC-101",
+  "timestamp": "2026-03-03T06:45:00",
+  "subsystem": "jira",
+  "type": "incident",
+  "title": "Checkout API 5xx Spike",
+  "status": "Done",
+  "assignee": "maria",
+  "body": "Production monitoring detected a 5xx error rate of 12% on checkout-api starting at 06:30 UTC. Impact: customer-facing checkout flow degraded. Root cause: stale cache entries in the Redis cluster."
+}

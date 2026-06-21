@@ -52,12 +52,12 @@ class FileCorpusAdapter:
     def __init__(
         self,
         root_dir: str | Path,
-        subsystem_map: Optional[Dict[str, str]] = None,
+        subsystem_map: dict[str, str] | None = None,
     ):
         self._root = Path(root_dir)
         self._subsystem_map = subsystem_map or {}
-        self._cache: Dict[str, dict] = {}
-        self._index: Dict[str, Path] = {}
+        self._cache: dict[str, dict] = {}
+        self._index: dict[str, Path] = {}
         self._build_index()
 
     def _build_index(self) -> None:
@@ -65,7 +65,7 @@ class FileCorpusAdapter:
             artifact_id = p.stem
             self._index[artifact_id] = p
 
-    def _load(self, artifact_id: str) -> Optional[dict]:
+    def _load(self, artifact_id: str) -> dict | None:
         if artifact_id in self._cache:
             return self._cache[artifact_id]
         path = self._index.get(artifact_id)
@@ -77,7 +77,7 @@ class FileCorpusAdapter:
         self._cache[artifact_id] = doc
         return doc
 
-    def fetch(self, artifact_id: str, as_of: Optional[str] = None) -> Optional[dict]:
+    def fetch(self, artifact_id: str, as_of: str | None = None) -> dict | None:
         doc = self._load(artifact_id)
         if doc is None:
             return None
@@ -90,10 +90,10 @@ class FileCorpusAdapter:
     def search(
         self,
         query: str,
-        artifact_type: Optional[str] = None,
-        as_of: Optional[str] = None,
+        artifact_type: str | None = None,
+        as_of: str | None = None,
         limit: int = 10,
-    ) -> List[dict]:
+    ) -> list[dict]:
         results = []
         pattern = re.compile(re.escape(query), re.IGNORECASE)
         for artifact_id, _path in self._index.items():
@@ -115,19 +115,19 @@ class FileCorpusAdapter:
                 break
         return results
 
-    def timestamp_of(self, artifact_id: str) -> Optional[str]:
+    def timestamp_of(self, artifact_id: str) -> str | None:
         doc = self._load(artifact_id)
         if not doc:
             return None
         return doc.get("timestamp") or doc.get("created_at") or doc.get("date")
 
-    def subsystem_of(self, artifact_id: str) -> Optional[str]:
+    def subsystem_of(self, artifact_id: str) -> str | None:
         if artifact_id in self._subsystem_map:
             return self._subsystem_map[artifact_id]
         doc = self._load(artifact_id)
         return doc.get("subsystem") if doc else None
 
-    def list_ids(self, subsystem: Optional[str] = None) -> List[str]:
+    def list_ids(self, subsystem: str | None = None) -> list[str]:
         if not subsystem:
             return list(self._index.keys())
         return [aid for aid in self._index if self.subsystem_of(aid) == subsystem]
@@ -140,7 +140,7 @@ class NullCorpusAdapter:
     The framework still enforces gate logic for citation scoring.
     """
 
-    def fetch(self, artifact_id: str, as_of: Optional[str] = None) -> None:
+    def fetch(self, artifact_id: str, as_of: str | None = None) -> None:
         return None
 
     def search(self, query: str, artifact_type=None, as_of=None, limit=10) -> list:
@@ -183,31 +183,31 @@ class YamlAccessPolicy:
     """
 
     def __init__(self, config: dict):
-        self._actors: Dict[str, str] = config.get("actors", {})
-        self._roles: Dict[str, Dict] = config.get("roles", {})
+        self._actors: dict[str, str] = config.get("actors", {})
+        self._roles: dict[str, dict] = config.get("roles", {})
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "YamlAccessPolicy":
+    def from_file(cls, path: str | Path) -> YamlAccessPolicy:
         with open(path) as f:
             data = yaml.safe_load(f)
             if not isinstance(data, dict):
                 raise ValueError(f"Expected YAML mapping, got {type(data).__name__}")
             return cls(data)
 
-    def subsystems_for_role(self, role: str) -> Set[str]:
+    def subsystems_for_role(self, role: str) -> set[str]:
         role_cfg = self._roles.get(role, {})
         return set(role_cfg.get("subsystems", []))
 
-    def role_for_actor(self, actor_id: str) -> Optional[str]:
+    def role_for_actor(self, actor_id: str) -> str | None:
         return self._actors.get(actor_id)
 
     def visible_artifacts(
         self,
         actor_id: str,
-        all_artifact_ids: List[str],
-        as_of: Optional[str] = None,
-        corpus: Optional[CorpusAdapter] = None,
-    ) -> Set[str]:
+        all_artifact_ids: list[str],
+        as_of: str | None = None,
+        corpus: CorpusAdapter | None = None,
+    ) -> set[str]:
         role = self.role_for_actor(actor_id)
         if not role:
             return set()
@@ -240,12 +240,12 @@ class EventLogPolicy:
             broadcast_event_types: [incident_opened, incident_resolved]
     """
 
-    def __init__(self, config: dict, events: List[LogEvent]):
+    def __init__(self, config: dict, events: list[LogEvent]):
         self._base = YamlAccessPolicy(config)
         self._events = events
-        self._roles: Dict[str, Dict] = config.get("roles", {})
-        self._artifact_actors: Dict[str, Set[str]] = {}
-        self._artifact_event_type: Dict[str, str] = {}
+        self._roles: dict[str, dict] = config.get("roles", {})
+        self._artifact_actors: dict[str, set[str]] = {}
+        self._artifact_event_type: dict[str, str] = {}
         self._build_index()
 
     def _build_index(self) -> None:
@@ -262,27 +262,27 @@ class EventLogPolicy:
 
     @classmethod
     def from_file(
-        cls, config_path: str | Path, events: List[LogEvent]
-    ) -> "EventLogPolicy":
+        cls, config_path: str | Path, events: list[LogEvent]
+    ) -> EventLogPolicy:
         with open(config_path) as f:
             data = yaml.safe_load(f)
             if not isinstance(data, dict):
                 raise ValueError(f"Expected YAML mapping, got {type(data).__name__}")
             return cls(data, events)
 
-    def subsystems_for_role(self, role: str) -> Set[str]:
+    def subsystems_for_role(self, role: str) -> set[str]:
         return self._base.subsystems_for_role(role)
 
-    def role_for_actor(self, actor_id: str) -> Optional[str]:
+    def role_for_actor(self, actor_id: str) -> str | None:
         return self._base.role_for_actor(actor_id)
 
     def visible_artifacts(
         self,
         actor_id: str,
-        all_artifact_ids: List[str],
-        as_of: Optional[str] = None,
-        corpus: Optional[CorpusAdapter] = None,
-    ) -> Set[str]:
+        all_artifact_ids: list[str],
+        as_of: str | None = None,
+        corpus: CorpusAdapter | None = None,
+    ) -> set[str]:
         role = self.role_for_actor(actor_id)
         if not role:
             return set()

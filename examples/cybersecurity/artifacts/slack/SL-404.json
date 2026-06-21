@@ -1,0 +1,8 @@
+{
+  "id": "SL-404",
+  "timestamp": "2026-03-10T10:30:00",
+  "subsystem": "slack",
+  "channel": "soc",
+  "sender": "chen",
+  "text": "SPLK-1005 phishing alert: fake benefits portal sent to HR. We caught it before any clicks. Email purged. No credential theft expected. Fatima, FYI for awareness."
+}

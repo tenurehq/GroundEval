@@ -1,0 +1,9 @@
+{
+  "id": "EML-304",
+  "timestamp": "2026-03-02T11:00:00",
+  "subsystem": "email",
+  "from": "associate_ramirez",
+  "to": "client_acme_rep",
+  "subject": "Draft License for Beta Inc",
+  "body": "DPA may be required if personal data processed."
+}

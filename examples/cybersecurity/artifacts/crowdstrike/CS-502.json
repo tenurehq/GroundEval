@@ -1,0 +1,10 @@
+{
+  "id": "CS-502",
+  "timestamp": "2026-03-03T02:10:00",
+  "subsystem": "crowdstrike",
+  "type": "detection",
+  "hostname": "HR-DB-02",
+  "detection_name": "SuspiciousSMBConnection",
+  "severity": "critical",
+  "details": "SMB connection from FIN-DT-07 using jsmith credentials. Technique: T1550.002 (Pass the Hash). Lateral movement detected. Source process: cmd.exe."
+}

@@ -1,0 +1,10 @@
+{
+  "id": "ESC-106",
+  "timestamp": "2026-03-14T16:00:00",
+  "subsystem": "jira",
+  "type": "incident",
+  "title": "Notification Service Queue Backup",
+  "status": "Resolved",
+  "assignee": "james",
+  "body": "Notification queue reached 50K depth. Root cause: downstream email provider throttled. Queue auto-drained after provider recovered."
+}

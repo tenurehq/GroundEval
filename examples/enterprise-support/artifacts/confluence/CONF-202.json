@@ -1,0 +1,12 @@
+{
+  "id": "CONF-202",
+  "timestamp": "2026-03-12T10:00:00",
+  "subsystem": "confluence",
+  "type": "postmortem",
+  "title": "ESC-103 Postmortem: Reporting Worker Data Drift",
+  "authors": [
+    "james",
+    "maria"
+  ],
+  "body": "Postmortem for Globex data inconsistency. Root cause: timezone handling bug. Fix: hotfix v2.4.2. Prevention: added timezone-aware integration tests."
+}

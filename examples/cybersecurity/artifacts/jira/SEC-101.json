@@ -1,0 +1,11 @@
+{
+  "id": "SEC-101",
+  "timestamp": "2026-03-02T08:20:00",
+  "subsystem": "jira",
+  "type": "security_incident",
+  "title": "Spear-Phishing \u2192 Credential Theft \u2192 Lateral Movement",
+  "status": "Resolved",
+  "severity": "critical",
+  "assignee": "fatima",
+  "body": "Phishing email delivered to jsmith@company.com. User opened attachment. Hours later: lsass.exe credential dump detected on FIN-DT-07, followed by Pass-the-Hash lateral movement to HR-DB-02. Both hosts contained. Credentials rotated. See postmortem CONF-301."
+}

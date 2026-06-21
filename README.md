@@ -176,11 +176,58 @@ The enterprise team runs the same two commands the solo dev ran. They just have 
 
 ```bash
 uv sync --group dev
-uv run python -m groundeval generate --config config.yaml --events events.jsonl
-uv run python -m groundeval eval --config config.yaml --questions eval_output/eval_questions.json --events events.jsonl
+uv run python -m groundeval generate --config config/config.yaml --events events.jsonl
+uv run python -m groundeval eval --config config/config.yaml --questions eval_output/eval_questions.json --events events.jsonl
 ```
 
 You'll get per-question scores with failure reasons, an aggregate summary, and trajectory diagnostics. Fix your agent, run again, compare.
+
+
+## Example domains
+
+The `examples/` directory contains five ready-to-run evaluation scenarios. Each one is a complete domain: a config, an event log, and an artifact corpus. Copy any folder and you can generate questions and run an eval in under ten minutes.
+
+| Domain | Actors | What it tests |
+|---|---|---|
+| **enterprise-support** | 5 (engineer, sales, support lead, support agent) | Role-based access across Zendesk, Jira, Confluence, Slack, Salesforce, and Git. Escalation causality, postmortem silence gaps, churn detection chains |
+| **cybersecurity** | 5 (L1 analyst, L2 analyst, incident responder, security engineer, threat hunter) | Tiered SOC access control. Attack chain causality (phishing → credential theft → lateral movement → ransomware). Search discipline across Splunk, CrowdStrike, Jira, and Confluence |
+| **healthcare** | 6 (physician, nurse, pharmacist, billing specialist, care coordinator, patient advocate) | HIPAA-style access boundaries: billing can't see clinical notes, pharmacist can't see imaging, advocate can't see billing claims. Medication error causality, lab-to-treatment chains, discharge follow-up gaps |
+| **finance** | 5 (applicant, loan officer, underwriter, fraud analyst, compliance reviewer) | Temporal cutoff discipline (what was known at decision time). Role-based access to credit reports, fraud alerts, and underwriting notes. Regulatory silence checks for adverse action notices |
+| **legal** | 6 (associate, partner, client, opposing counsel, paralegal, compliance reviewer) | Privilege boundaries: opposing counsel cannot see matter notes or privileged docs. Citation discipline. Version-tracking across contract redlines. DPA and filing compliance gaps |
+
+Each domain exercises all three evaluation tracks: **PERSPECTIVE** (could this actor have known?), **COUNTERFACTUAL** (did X cause Y?), and **SILENCE** (did the agent search before concluding "no?").
+
+### Using an example
+
+```bash
+# 1. Copy a domain
+cp -r examples/healthcare my-eval/
+cd my-eval/
+
+# 2. Generate questions
+uv run python -m groundeval generate --config config.yaml --events events.jsonl
+
+# 3. Run evaluation
+uv run python -m groundeval eval \
+  --config config.yaml \
+  --questions eval_output/eval_questions.json \
+  --events events.jsonl \
+  --model claude-sonnet-4-6
+```
+
+### Creating your own
+
+Each domain needs exactly three things, and the examples show you the pattern:
+
+1. **config.yaml** (~50 lines) declaring actors, roles, subsystems, causal links, and silence pairs
+2. **events.jsonl** (~40 timestamped events with actor and artifact references)
+3. **artifacts/** (JSON files your agent retrieves, one per artifact ID)
+
+If you don't have your own data yet, ask an LLM:
+
+> "Generate a 40-event JSONL log and matching artifacts for a <your-domain> with 4 actors over 2 weeks. Include a mix of causal chains and silent gaps."
+
+Drop the output in your folder and you're ready. The framework doesn't care whether the data came from an LLM prompt or a production event stream; the evaluation pipeline is the same.
 
 ## Three evaluation tracks
 
@@ -221,7 +268,7 @@ GroundEval supports two agent architectures.
 
 **Tool mode**: the framework creates a gated runtime. Your agent calls `runtime.fetch()` and `runtime.search()`. The runtime records every call, enforces visibility and temporal gates, and the trajectory scorer checks whether the trace was valid.
 
-**Context mode** (`--context-injection`): the framework packs relevant artifacts into the context window. Your agent answers from context without tool calls. The scorer checks citation discipline — did the agent cite the right artifacts and avoid citing irrelevant ones?
+**Context mode** (`--context-injection`): the framework packs relevant artifacts into the context window. Your agent answers from context without tool calls. The scorer checks citation discipline: did the agent cite the right artifacts and avoid citing irrelevant ones?
 
 Wire your agent by replacing `_build_agent_fn` in `groundeval/run.py`. The expected signature takes a question, context, tools, max_steps, and optional runtime, and returns a trajectory plus answer dict.
 
@@ -247,7 +294,7 @@ The framework is designed so you swap parts without rebuilding the engine.
 
 ## What this is not
 
-GroundEval does not replace human or model judgment for subjective quality — tone, style, persuasiveness, conversational fluency. It is for cases where correctness can be verified from state, evidence, permissions, and tool traces. Use it alongside, not instead of, qualitative evaluation.
+GroundEval does not replace human or model judgment for subjective quality: tone, style, persuasiveness, conversational fluency. It is for cases where correctness can be verified from state, evidence, permissions, and tool traces. 
 
 ## Installation
 
@@ -256,7 +303,3 @@ Python 3.13+ with `uv`:
 ```bash
 uv sync --group dev
 ```
-
-## Status
-
-This is an early framework. The core abstractions are in place. Production use should add provider-backed agent runners, generation diagnostics, reproducible seeds, and richer examples.

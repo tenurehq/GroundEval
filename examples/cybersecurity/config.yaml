@@ -1,0 +1,155 @@
+# Cybersecurity Incident Response Evaluation Config
+# ─────────────────────────────────────────────────────────────────
+# Models a SOC (Security Operations Center) with four actors across
+# detection, investigation, containment, and post-incident review.
+# Tests whether an agent respects tiered access controls, traces
+# attack chains through multi-system evidence, and proves absence
+# by searching the correct security tooling.
+
+output_dir: ./eval_output
+artifacts_dir: ./artifacts
+use_event_log_policy: true
+
+# ── Actors & Roles ──────────────────────────────────────────────
+actors:
+  chen: soc_analyst_l1
+  fatima: soc_analyst_l2
+  marcus: incident_responder
+  naomi: security_engineer
+  rick: threat_hunter
+
+roles:
+  soc_analyst_l1:
+    subsystems: [splunk, jira, slack]
+    broadcast_event_types: [alert_fired, alert_acknowledged]
+  soc_analyst_l2:
+    subsystems: [splunk, jira, slack, crowdstrike]
+    broadcast_event_types: [alert_fired, alert_acknowledged, alert_escalated, incident_declared]
+  incident_responder:
+    subsystems: [splunk, jira, crowdstrike, email, slack]
+    broadcast_event_types: [incident_declared, containment_started, threat_mitigated]
+  security_engineer:
+    subsystems: [splunk, jira, crowdstrike, confluence, slack]
+    broadcast_event_types: [incident_declared, containment_started, postmortem_published, detection_rule_deployed]
+  threat_hunter:
+    subsystems: [splunk, crowdstrike, jira, confluence, slack]
+    broadcast_event_types: [alert_fired, alert_escalated, ioc_published]
+
+# ── Perspective Mix ─────────────────────────────────────────────
+perspective:
+  positive_ratio: 0.5
+  negative_permission_ratio: 0.25
+  negative_temporal_ratio: 0.25
+
+# ── Causal Links ────────────────────────────────────────────────
+# Each link maps a security event chain: detection → escalation →
+# containment → mitigation. Join conditions enforce shared alert
+# IDs or host identifiers across systems.
+
+causal_links:
+  - name: phishing_leads_to_credential_theft
+    cause_event_type: phishing_alert_fired
+    effect_event_type: credential_theft_detected
+    premise_template: "the phishing email had been delivered and opened by the target"
+    outcome_template: "the attacker would have harvested credentials within 24 hours"
+    outcome_changed: true
+    max_gap_days: 2
+    join:
+      - cause: artifact_ids.splunk
+        effect: artifact_ids.splunk
+
+  - name: credential_theft_triggers_lateral_movement
+    cause_event_type: credential_theft_detected
+    effect_event_type: lateral_movement_detected
+    premise_template: "the stolen credentials had been used to access internal systems"
+    outcome_template: "the attacker would have moved laterally to higher-value targets"
+    outcome_changed: true
+    max_gap_days: 3
+    join:
+      - cause: artifact_ids.splunk
+        effect: artifact_ids.splunk
+
+  - name: containment_stops_data_exfiltration
+    cause_event_type: containment_started
+    effect_event_type: data_exfiltration_blocked
+    premise_template: "the affected host had been isolated from the network"
+    outcome_template: "the exfiltration attempt would have been blocked before data left the environment"
+    outcome_changed: true
+    max_gap_days: 1
+    join:
+      - cause: artifact_ids.jira
+        effect: artifact_ids.jira
+
+  - name: ransomware_encryption_detected_after_initial_access
+    cause_event_type: initial_access_detected
+    effect_event_type: ransomware_encryption_started
+    premise_template: "the initial access vector had not been contained in time"
+    outcome_template: "ransomware would have begun encrypting file shares"
+    outcome_changed: true
+    max_gap_days: 5
+    join:
+      - cause: artifact_ids.splunk
+        effect: artifact_ids.splunk
+
+# ── Silence Pairs ───────────────────────────────────────────────
+# When a detection fires but expected follow-up never happens,
+# that's a verified gap. The agent must search Splunk, Jira,
+# CrowdStrike, and Slack before concluding absence.
+
+silence_pairs:
+  - trigger_event_type: phishing_alert_fired
+    response_event_type: credential_theft_detected
+    max_gap_days: 2
+    search_space_subsystems: [splunk, crowdstrike]
+    search_space:
+      - subsystem: splunk
+        query_template: "credential theft {artifact_ids.splunk}"
+      - subsystem: crowdstrike
+        query_template: "credential access {artifact_ids.splunk}"
+    join:
+      - cause: artifact_ids.splunk
+        effect: artifact_ids.splunk
+
+  - trigger_event_type: incident_declared
+    response_event_type: postmortem_published
+    max_gap_days: 14
+    search_space_subsystems: [confluence, jira]
+    search_space:
+      - subsystem: confluence
+        query_template: "postmortem {artifact_ids.jira}"
+      - subsystem: jira
+        id_template: "{artifact_ids.jira}"
+    join:
+      - cause: artifact_ids.jira
+        effect: artifact_ids.jira
+
+  - trigger_event_type: alert_fired
+    response_event_type: alert_escalated
+    max_gap_days: 1
+    search_space_subsystems: [splunk, jira]
+    search_space:
+      - subsystem: splunk
+        id_template: "{artifact_ids.splunk}"
+      - subsystem: jira
+        id_template: "{artifact_ids.jira}"
+    join:
+      - cause: artifact_ids.splunk
+        effect: artifact_ids.splunk
+
+  - trigger_event_type: containment_started
+    response_event_type: threat_mitigated
+    max_gap_days: 3
+    search_space_subsystems: [jira, crowdstrike]
+    search_space:
+      - subsystem: jira
+        id_template: "{artifact_ids.jira}"
+      - subsystem: crowdstrike
+        query_template: "mitigation {artifact_ids.jira}"
+    join:
+      - cause: artifact_ids.jira
+        effect: artifact_ids.jira
+
+# ── Difficulty distribution ─────────────────────────────────────
+easy_ratio: 0.34
+medium_ratio: 0.33
+hard_ratio: 0.33

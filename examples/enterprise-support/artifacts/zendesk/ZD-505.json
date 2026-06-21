@@ -1,0 +1,10 @@
+{
+  "id": "ZD-505",
+  "timestamp": "2026-03-02T09:00:00",
+  "subsystem": "zendesk",
+  "type": "ticket",
+  "customer": "Initech",
+  "priority": "low",
+  "title": "Billing invoice format question",
+  "body": "Initech accounting team asking about custom invoice formatting options."
+}

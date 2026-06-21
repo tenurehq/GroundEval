@@ -22,7 +22,7 @@ def make_event(
     eid: str,
     etype: str,
     ts: str,
-    actors: List[str],
+    actors: list[str],
     artifact_ids: dict,
     facts: dict = None,
 ):

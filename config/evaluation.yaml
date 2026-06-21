@@ -1,0 +1,67 @@
+# ==========================================
+# System-tuning defaults.  The framework loads this file at startup and
+# merges your config.yaml on top, so your domain keys (actors, roles,
+# causal_links, silence_pairs, provider, model, api_key) always win.
+#
+# To customize any of these values, copy this file next to your config.yaml
+# and edit it.  Or just set the key in your config.yaml; it takes priority
+# either way.
+
+# Random seed for reproducible question generation.  Set to an integer
+# (e.g. 42) to get the same question set every run.  null = no seeding.
+seed: null
+
+# Output directory for generated questions and eval results.
+output_dir: ./eval_output
+
+# Path to the artifact corpus directory.  null = context-injection mode.
+artifacts_dir: null
+
+# Use EventLogPolicy (true) or YamlAccessPolicy (false).
+use_event_log_policy: true
+
+# ── Difficulty distribution ───────────────────────────────────────────
+# Ratios must sum to ~1.0.  The framework samples questions to match.
+easy_ratio: 0.34
+medium_ratio: 0.33
+hard_ratio: 0.33
+
+# ── Question caps ──────────────────────────────────────────────────────
+# Maximum questions per track.  null = use built-in default of 40.
+max_perspective_questions: null
+max_counterfactual_questions: null
+max_silence_questions: null
+
+# ── Perspective config ─────────────────────────────────────────────────
+perspective:
+  positive_ratio: 0.5
+  negative_permission_ratio: 0.25
+  negative_temporal_ratio: 0.25
+  require_cross_subsystem_cases: true
+  easy_ratio: 0.34
+  medium_ratio: 0.33
+  hard_ratio: 0.33
+
+# ── Sampling caps ──────────────────────────────────────────────────────
+# Per-actor / per-event-type caps during question generation.
+# null = use built-in default of 5.
+max_questions_per_actor: null
+max_questions_per_event_type: null
+max_links_per_spec: null
+
+# ── Trivial search space ───────────────────────────────────────────────
+# Artifact IDs or subsystem names that are too generic to count as
+# meaningful search evidence for SILENCE questions.
+trivial_search_space: []
+
+# ── Provider defaults ──────────────────────────────────────────────────
+temperature: 0.0
+max_tokens: 1024
+max_retries: 3
+base_url: null
+
+# ── LLM question prose ─────────────────────────────────────────────────
+# Set llm_question_prose: true and provide llm_model to use an LLM for
+# natural-language question generation instead of deterministic templates.
+llm_question_prose: false
+llm_model: null

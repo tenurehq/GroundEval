@@ -1,0 +1,9 @@
+{
+  "id": "SPLK-1003",
+  "timestamp": "2026-03-05T11:00:00",
+  "subsystem": "splunk",
+  "type": "alert",
+  "alert_name": "VPN Brute Force Attempt",
+  "severity": "low",
+  "raw": "Source IP: 203.0.113.45. 847 failed login attempts for 12 accounts over 10 minutes. Source geo: known VPN exit node. Low confidence threat \u2014 likely script-kiddie."
+}
