@@ -47,131 +47,6 @@ Artifacts are JSON files in a directory:
 
 If you don't have your own data yet, ask an LLM: "Generate a 40-event log and matching artifacts for a customer-support domain with three actors over two weeks in March 2026." Drop the outputs into `events.jsonl` and `artifacts/`. You're ready.
 
-### 2. Write a config
-
-#### Example 1: Solo dev evaluating a memory agent
-
-This is for someone who built a memory agent over a weekend and wants to know if it actually retrieves correctly.
-
-They start with nothing. They ask an LLM for synthetic data:
-
-> "Generate a 30-event JSONL log for two actors (maya and dev) over one week of a personal knowledge base app. Events should include `note_created`, `note_updated`, `note_tagged`, and `memory_queried`. Include artifact IDs pointing into a markdown notes directory. Make the timeline realistic."
-
-The LLM produces `events.jsonl` and a handful of markdown artifacts. They drop them in `artifacts/`.
-
-Their config is 30 lines:
-
-```yaml
-output_dir: ./eval_output
-artifacts_dir: ./artifacts
-use_event_log_policy: true
-
-actors:
-  maya: user
-  dev: maintainer
-
-roles:
-  user:
-    subsystems: [notes]
-  maintainer:
-    subsystems: [notes, audit]
-    broadcast_event_types: [note_tagged]
-
-causal_links:
-  - name: tagging_improves_retrieval
-    cause_event_type: note_tagged
-    effect_event_type: memory_queried
-    premise_template: "the note was tagged correctly"
-    outcome_template: "the tagged note would appear in query results"
-    outcome_changed: true
-    max_gap_days: 3
-    join:
-      - cause: artifact_ids.note_id
-        effect: artifact_ids.note_id
-
-silence_pairs:
-  - trigger_event_type: note_updated
-    response_event_type: memory_queried
-    max_gap_days: 2
-    search_space_subsystems: [notes]
-    search_space:
-      - subsystem: notes
-        query_template: "{artifact_ids.note_id}"
-    join:
-      - cause: artifact_ids.note_id
-        effect: artifact_ids.note_id
-```
-
-They run two commands. In 10 minutes they have per-question scores telling them exactly which retrievals failed and why. They fix their memory agent's tag resolution, re-run, and see the trajectory score improve. No enterprise infrastructure. No org chart. Two synthetic users and one subsystem.
-
-#### Example 2: Enterprise team evaluating a support agent
-
-This is the same framework, different scale. The team already has an operational event log (Zendesk, Jira, Slack, Confluence), an artifact corpus, and role-based permissions.
-
-Their config declares their actual actors, roles, subsystems, and the correctness contracts for their support workflow. The structure is identical to Example 1 — actors, roles, causal links, silence pairs — but populated from production data rather than synthetic prompts.
-
-```yaml
-output_dir: ./eval_output
-artifacts_dir: ./artifacts
-use_event_log_policy: true
-
-actors:
-  alice: engineer
-  bob: sales
-  carol: support_lead
-  dave: support_agent
-
-roles:
-  engineer:
-    subsystems: [jira, git, slack, confluence]
-    broadcast_event_types: [incident_opened, incident_resolved]
-  sales:
-    subsystems: [salesforce, slack]
-  support_lead:
-    subsystems: [zendesk, slack, confluence, jira]
-    broadcast_event_types: [zd_ticket_opened, zd_tickets_escalated]
-  support_agent:
-    subsystems: [zendesk, confluence]
-    broadcast_event_types: [zd_ticket_opened]
-
-perspective:
-  positive_ratio: 0.5
-  negative_permission_ratio: 0.25
-  negative_temporal_ratio: 0.25
-
-causal_links:
-  - name: escalation_caused_postmortem
-    cause_event_type: escalation_opened
-    effect_event_type: postmortem_created
-    premise_template: "the escalation had been investigated"
-    outcome_template: "the postmortem would have been written"
-    outcome_changed: true
-    max_gap_days: 7
-    join:
-      - cause: artifact_ids.jira
-        effect: artifact_ids.jira
-
-silence_pairs:
-  - trigger_event_type: escalation_opened
-    response_event_type: postmortem_created
-    max_gap_days: 7
-    search_space_subsystems: [confluence, jira, slack]
-    search_space:
-      - subsystem: confluence
-        query_template: "postmortem {artifact_ids.jira}"
-      - subsystem: jira
-        id_template: "{artifact_ids.jira}"
-      - subsystem: slack
-        query_template: "{artifact_ids.jira} escalation"
-    join:
-      - cause: artifact_ids.jira
-        effect: artifact_ids.jira
-```
-
-The framework doesn't care whether the data came from an LLM prompt or from a production Kafka stream. The evaluation pipeline is the same: generate questions, run the agent, score answers and trajectories, inspect failure reasons, fix the agent, repeat.
-
-The enterprise team runs the same two commands the solo dev ran. They just have a bigger config and a real artifact backend.
-
 ### 3. Generate questions and run evaluation
 
 ```bash
@@ -261,6 +136,16 @@ Each question produces two scores:
 | `trajectory_score` | Did the agent follow a valid evidence path? |
 
 The trajectory score checks different things depending on the track: subsystem coverage for SILENCE, visibility-cone discipline for PERSPECTIVE, causal mechanism identification for COUNTERFACTUAL. The combined score weights trajectory more heavily for tracks where the path is the point.
+
+### Diagnostics
+
+The score is deterministic. The diagnostic trace is explanatory.
+
+Every evaluated question includes a structured diagnostic trace alongside the score. The trace records the agent run as data: tool calls, tool results, submitted answers, errors, and optional agent messages emitted between steps.
+
+Diagnostics are not used to award credit. The scorer still relies only on the deterministic trajectory: searches, fetches, citations, permissions, timestamps, and configured state boundaries. The diagnostic trace exists so you can debug why the score happened.
+
+This matters when the answer score and trajectory score diverge. An agent may get the final answer right while fetching an inaccessible artifact, using evidence from after the cutoff time, skipping the required absence search, or assuming that two events are causally related because their titles look similar. The diagnostic trace gives you the per-question timeline needed to inspect the failure without reconstructing it from interleaved logs.
 
 ## Tool mode and context mode
 
