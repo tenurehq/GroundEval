@@ -33,6 +33,20 @@ GroundEval ships with three evaluation tracks. Each tests a different kind of re
 
 > *Was a postmortem documented for incident ESC-42?*
 
+## Start with the walkthroughs
+
+The README gives you the framework. These short essays show how to think about each failure mode before you wire GroundEval into your own agent.
+
+* **[How to test whether an agent checked before saying "no"](https://tenureai.dev/writing/how-to-test-agent-checked-before-saying-no/)**
+  Start here if your agent answers absence questions: no postmortem, no follow-up, no escalation, no record found. This walks through the Silence track and why a correct "no" still fails if the agent did not search the required places.
+
+* **[How to test what an AI agent was allowed to know](https://tenureai.dev/writing/how-to-test-agent-perspective/)**
+  Read this if your agent works across tools with role boundaries. This walks through the Perspective track and the difference between relevant evidence and permissible evidence.
+
+* **How to test whether an agent found the real cause**
+  Read this if your agent explains why something happened. This walks through the Counterfactual track and why temporal adjacency is not enough to prove causation.
+
+
 ## What gets scored
 
 Each question produces two scores:
