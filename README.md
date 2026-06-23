@@ -181,10 +181,18 @@ The framework is designed so you swap parts without rebuilding the engine.
 
 GroundEval does not replace human or model judgment for subjective quality: tone, style, persuasiveness, conversational fluency. It is for cases where correctness can be verified from state, evidence, permissions, and tool traces. 
 
-## Installation
 
-Python 3.13+ with `uv`:
+## Citation
 
-```bash
-uv sync --group dev
+If you use this work, please cite:
+
+```bibtex
+@article{Jeffrey_Flynt_GroundEval_A_Deterministic_2026,
+author = {Jeffrey Flynt, Jeffrey Flynt},
+journal = {arXiv preprint},
+title = {{GroundEval: A Deterministic Replacement for LLM-as-Judge in Stateful Agent Evaluation}},
+url = {https://arxiv.org/abs/2606.22737},
+year = {2026}
+}
 ```
+
