@@ -138,6 +138,9 @@ def test_silence_pair_spec_from_dict():
     assert spec.search_space_selectors[0].subsystem == "jira"
 
 
+# test_core.py, lines ~155-178
+
+
 def test_gated_runtime_perspective_fetch_gate(tmp_path: Path):
     corpus = DummyCorpus({
         "email-001": {
@@ -172,7 +175,7 @@ def test_gated_runtime_perspective_fetch_gate(tmp_path: Path):
         actor_subsystem_access={"email"},
     )
     assert runtime.fetch("email-001") is not None
-    assert runtime.fetch("jira-42") is not None
+    assert runtime.fetch("jira-42") is None
     traj = runtime.trajectory()
     assert any(c.actor_gate_violation for c in traj.tool_calls)
     assert any(c.subsystem_violation for c in traj.tool_calls)
