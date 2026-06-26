@@ -1,9 +1,0 @@
-{
-  "id": "SPLK-1004",
-  "timestamp": "2026-03-08T03:00:00",
-  "subsystem": "splunk",
-  "type": "alert",
-  "alert_name": "Unusual Outbound Data Transfer",
-  "severity": "high",
-  "raw": "Host: DB-REPL-03. Dest: 198.51.100.77:443. Volume: 5.0 GB in 12 minutes. Protocol: HTTPS. Time: 0300 UTC (outside business hours). Indicator: possible data exfiltration."
-}

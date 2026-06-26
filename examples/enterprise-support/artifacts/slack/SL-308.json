@@ -1,8 +1,0 @@
-{
-  "id": "SL-308",
-  "timestamp": "2026-03-17T14:15:00",
-  "subsystem": "slack",
-  "channel": "incidents",
-  "sender": "maria",
-  "text": "ESC-107: auth-service critical. War room open. All hands on deck."
-}

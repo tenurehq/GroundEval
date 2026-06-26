@@ -1,8 +1,0 @@
-{
-  "id": "SL-402",
-  "timestamp": "2026-03-09T08:00:00",
-  "subsystem": "slack",
-  "channel": "threat-intel",
-  "sender": "rick",
-  "text": "New APT-Orange IOCs from ISAC bulletin 2026-031. 12 indicators. Running retrospective hunt across Splunk and CrowdStrike. Will report findings by EOD."
-}

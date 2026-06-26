@@ -1,9 +1,0 @@
-{
-  "id": "EML-303",
-  "timestamp": "2026-03-05T10:00:00",
-  "subsystem": "email",
-  "from": "compliance_wong",
-  "to": "associate_ramirez",
-  "subject": "Acme-SAAS-2026 compliance hold",
-  "body": "We need a signed DPA before execution."
-}

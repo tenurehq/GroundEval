@@ -1,87 +1,67 @@
 """
 groundeval
 ===============
-A generalizable, deterministic evaluation framework for AI agents.
+A deterministic evaluation framework for AI agents.
 
-No LLM-as-judge. All scoring is gate-based and verifiable against a
-user-supplied event log + access policy.
+No LLM-as-judge. All scoring is structural comparison against
+seeded artifacts and task contracts.
 
-Three tracks:
-  - PERSPECTIVE   : epistemic discipline (actor visibility cone)
-  - COUNTERFACTUAL: causal mechanism identification
-  - SILENCE       : absence verification with search-space coverage
+Three tracks applied to every run:
+  - COUNTERFACTUAL : did cited evidence support the conclusion?
+  - SILENCE        : did the agent verify all preconditions?
+  - PERSPECTIVE    : did the agent stay within permission boundaries?
 
 Usage:
-    python -m groundeval generate --config config.yaml --events events.jsonl
-    python -m groundeval eval --config config.yaml --questions eval_output/eval_questions.json
+    python -m groundeval task --config config.yaml
 """
 
 from .core import (
-    AbsenceRecord,
     AgentTrajectory,
-    CausalJoinSpec,
-    CausalLink,
-    CausalLinkSpec,
-    CorpusAdapter,
     AccessPolicy,
-    EvalQuestion,
-    EvalResult,
+    CorpusAdapter,
     GatedRuntime,
-    LogEvent,
-    PerspectiveConfig,
-    SearchSpaceSelector,
-    SilencePairSpec,
+    TaskContract,
+    TaskPrecondition,
+    TaskEvalResult,
     ToolCall,
-    ANSWER_SCHEMAS,
-    load_events,
+    ANSWER_SCHEMA_TASK,
 )
 from .adapters import (
     FileCorpusAdapter,
+    InMemoryCorpusAdapter,
     NullCorpusAdapter,
     YamlAccessPolicy,
-    EventLogPolicy,
-)
-from .question_gen import (
-    CausalLinkIndexer,
-    AbsenceCatalogBuilder,
-    QuestionGenerator,
 )
 from .scorers import (
-    PerspectiveScorer,
-    CounterfactualScorer,
-    SilenceScorer,
-    combine_scores,
-    aggregate,
+    score_task_run,
+    aggregate_task_results,
+)
+from .task_eval import (
+    run_task,
+    run_all_tasks,
+    build_task_question_text,
 )
 
+
 __all__ = [
-    "AbsenceRecord",
     "AgentTrajectory",
-    "CausalJoinSpec",
-    "CausalLink",
-    "CausalLinkSpec",
-    "CorpusAdapter",
     "AccessPolicy",
-    "EvalQuestion",
-    "EvalResult",
+    "CorpusAdapter",
     "GatedRuntime",
-    "LogEvent",
-    "PerspectiveConfig",
-    "SearchSpaceSelector",
-    "SilencePairSpec",
+    "TaskContract",
+    "TaskPrecondition",
+    "TaskEvalResult",
     "ToolCall",
-    "ANSWER_SCHEMAS",
-    "load_events",
+    "ANSWER_SCHEMA_TASK",
     "FileCorpusAdapter",
+    "InMemoryCorpusAdapter",
     "NullCorpusAdapter",
     "YamlAccessPolicy",
-    "EventLogPolicy",
-    "CausalLinkIndexer",
-    "AbsenceCatalogBuilder",
-    "QuestionGenerator",
-    "PerspectiveScorer",
-    "CounterfactualScorer",
-    "SilenceScorer",
-    "combine_scores",
-    "aggregate",
+    "score_task_run",
+    "aggregate_task_results",
+    "run_task",
+    "run_all_tasks",
+    "build_task_question_text",
+    "DistractorGenerator",
+    "load_seed_artifacts",
 ]

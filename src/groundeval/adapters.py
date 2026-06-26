@@ -8,8 +8,6 @@ FileCorpusAdapter  — artifacts live in a flat directory of JSON files.
 NullCorpusAdapter  — context-injection mode. No retrieval; the framework
                      pre-loads context into the agent's prompt instead.
 YamlAccessPolicy   — roles and subsystem access declared in config.yaml.
-EventLogPolicy     — derives visibility from the event log itself
-                     (actor appears in event.actors -> can see that event's artifacts).
 """
 
 from __future__ import annotations
@@ -17,12 +15,12 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from .core import (
     CorpusAdapter,
-    LogEvent,
 )
 
 
@@ -61,18 +59,56 @@ class FileCorpusAdapter:
 
     def _build_index(self) -> None:
         for p in self._root.rglob("*.json"):
-            artifact_id = p.stem
-            self._index[artifact_id] = p
+            try:
+                doc = json.loads(p.read_text())
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._index[p.stem] = p
+                continue
+
+            if isinstance(doc, list):
+                for i, item in enumerate(doc):
+                    if isinstance(item, dict):
+                        aid = item.get("id", item.get("_id", ""))
+                        if aid:
+                            if aid in self._index:
+                                import warnings
+
+                                warnings.warn(
+                                    f"FileCorpusAdapter: duplicate artifact ID "
+                                    f"'{aid}' found in {p} at index {i}. "
+                                    f"Previous entry will be overwritten.",
+                                    stacklevel=2,
+                                )
+                            self._index[aid] = (p, i)
+            elif isinstance(doc, dict):
+                self._index[p.stem] = p
+            else:
+                self._index[p.stem] = p
 
     def _load(self, artifact_id: str) -> dict | None:
         if artifact_id in self._cache:
             return self._cache[artifact_id]
-        path = self._index.get(artifact_id)
-        if not path:
+        entry = self._index.get(artifact_id)
+        if not entry:
             return None
-        doc = json.loads(path.read_text())
-        if "subsystem" not in doc and path.parent != self._root:
-            doc["subsystem"] = path.parent.name
+
+        if isinstance(entry, tuple):
+            # Array file entry: (path, index)
+            path, idx = entry
+            doc = json.loads(path.read_text())
+            if isinstance(doc, list) and 0 <= idx < len(doc):
+                doc = doc[idx]
+            else:
+                return None
+        else:
+            doc = json.loads(entry.read_text())
+
+        if "subsystem" not in doc and isinstance(entry, tuple):
+            # For array files, subsystem comes from the object itself
+            pass
+        elif "subsystem" not in doc and entry.parent != self._root:
+            doc["subsystem"] = entry.parent.name
+
         self._cache[artifact_id] = doc
         return doc
 
@@ -93,6 +129,10 @@ class FileCorpusAdapter:
         as_of: str | None = None,
         limit: int = 10,
     ) -> list[dict]:
+
+        if limit <= 0:
+            return []
+
         results = []
         pattern = re.compile(re.escape(query), re.IGNORECASE)
         for artifact_id, _path in self._index.items():
@@ -212,7 +252,7 @@ class YamlAccessPolicy:
             return set()
         accessible = self.subsystems_for_role(role)
         if corpus is None:
-            return set(all_artifact_ids)
+            return set()
         visible = set()
         for aid in all_artifact_ids:
             subsystem = corpus.subsystem_of(aid)
@@ -221,95 +261,73 @@ class YamlAccessPolicy:
         return visible
 
 
-class EventLogPolicy:
+class InMemoryCorpusAdapter:
     """
-    Derives actor visibility from event log participation.
+    Corpus adapter that serves artifacts from an in-memory list.
 
-    An actor can see artifact X if:
-      1. The actor appears in event.actors for the event that created X, OR
-      2. The event type is in the actor's broadcast_event_types (role config)
-
-    This is the richer model that simulation harnesses use internally.
-
-    config structure (in addition to YamlAccessPolicy fields):
-
-        roles:
-          engineer:
-            subsystems: [jira, git, slack, confluence]
-            broadcast_event_types: [incident_opened, incident_resolved]
+    Used for distractor mode where seed + generated artifacts are
+    held in memory rather than on disk.
     """
 
-    def __init__(self, config: dict, events: list[LogEvent]):
-        self._base = YamlAccessPolicy(config)
-        self._events = events
-        self._roles: dict[str, dict] = config.get("roles", {})
-        self._artifact_actors: dict[str, set[str]] = {}
-        self._artifact_event_type: dict[str, str] = {}
-        self._build_index()
+    def __init__(self, artifacts: list[dict[str, Any]]):
+        self._by_id: dict[str, dict] = {}
+        for a in artifacts:
+            aid = a.get("id", a.get("_id", ""))
+            if aid:
+                self._by_id[aid] = a
 
-    def _build_index(self) -> None:
-        for event in self._events:
-            for _key, val in event.artifact_ids.items():
-                ids = val if isinstance(val, list) else [val]
-                for aid in ids:
-                    if not aid:
-                        continue
-                    if aid not in self._artifact_actors:
-                        self._artifact_actors[aid] = set()
-                    self._artifact_actors[aid].update(event.actors)
-                    self._artifact_event_type[aid] = event.type
+    def fetch(self, artifact_id: str, as_of: str | None = None) -> dict | None:
+        doc = self._by_id.get(artifact_id)
+        if doc is None:
+            return None
+        if as_of:
+            ts = doc.get("timestamp") or doc.get("created_at") or doc.get("date", "")
+            if ts and ts > as_of:
+                return None
+        return doc
 
-    @classmethod
-    def from_file(
-        cls, config_path: str | Path, events: list[LogEvent]
-    ) -> EventLogPolicy:
-        with open(config_path) as f:
-            data = yaml.safe_load(f)
-            if not isinstance(data, dict):
-                raise ValueError(f"Expected YAML mapping, got {type(data).__name__}")
-            return cls(data, events)
-
-    def subsystems_for_role(self, role: str) -> set[str]:
-        return self._base.subsystems_for_role(role)
-
-    def role_for_actor(self, actor_id: str) -> str | None:
-        return self._base.role_for_actor(actor_id)
-
-    def visible_artifacts(
+    def search(
         self,
-        actor_id: str,
-        all_artifact_ids: list[str],
+        query: str,
+        artifact_type: str | None = None,
         as_of: str | None = None,
-        corpus: CorpusAdapter | None = None,
-    ) -> set[str]:
-        role = self.role_for_actor(actor_id)
-        if not role:
-            return set()
+        limit: int = 10,
+    ) -> list[dict]:
+        if limit <= 0:
+            return []
 
-        accessible_subsystems = self.subsystems_for_role(role)
-        broadcast_types = set(
-            self._roles.get(role, {}).get("broadcast_event_types", [])
-        )
+        import re
 
-        visible = set()
-        for aid in all_artifact_ids:
-            if as_of and corpus:
-                ts = corpus.timestamp_of(aid)
+        pattern = re.compile(re.escape(query), re.IGNORECASE)
+        results = []
+        for doc in self._by_id.values():
+            if artifact_type and doc.get("subsystem") != artifact_type:
+                continue
+            if as_of:
+                ts = (
+                    doc.get("timestamp") or doc.get("created_at") or doc.get("date", "")
+                )
                 if ts and ts > as_of:
                     continue
+            if pattern.search(json.dumps(doc)):
+                results.append(doc)
+            if len(results) >= limit:
+                break
+        return results
 
-            if actor_id in self._artifact_actors.get(aid, set()):
-                visible.add(aid)
-                continue
+    def timestamp_of(self, artifact_id: str) -> str | None:
+        doc = self._by_id.get(artifact_id)
+        if not doc:
+            return None
+        return doc.get("timestamp") or doc.get("created_at") or doc.get("date")
 
-            event_type = self._artifact_event_type.get(aid, "")
-            if event_type in broadcast_types:
-                visible.add(aid)
-                continue
+    def subsystem_of(self, artifact_id: str) -> str | None:
+        doc = self._by_id.get(artifact_id)
+        return doc.get("subsystem") if doc else None
 
-            subsystem = corpus.subsystem_of(aid) if corpus else None
-            if subsystem and subsystem not in accessible_subsystems:
-                continue
-            visible.add(aid)
-
-        return visible
+    def list_ids(self, subsystem: str | None = None) -> list[str]:
+        if not subsystem:
+            return list(self._by_id.keys())
+        return [
+            aid for aid, doc in self._by_id.items() if doc.get("subsystem") == subsystem
+        ]

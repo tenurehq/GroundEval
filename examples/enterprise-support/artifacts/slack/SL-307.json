@@ -1,8 +1,0 @@
-{
-  "id": "SL-307",
-  "timestamp": "2026-03-16T09:00:00",
-  "subsystem": "slack",
-  "channel": "support",
-  "sender": "priya",
-  "text": "Q1 support metrics: 98% SLA compliance, 4 incidents, 3 postmortems. Great quarter team."
-}

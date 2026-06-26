@@ -1,9 +1,0 @@
-{
-  "id": "BS-303",
-  "timestamp": "2026-03-10T10:00:00",
-  "subsystem": "bank_statements",
-  "applicant": "Patel",
-  "account_type": "checking",
-  "avg_balance": 22000,
-  "months": 3
-}

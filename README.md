@@ -2,188 +2,207 @@
 
 **Deterministic evaluation for agents that reason over state.**
 
-You built an agent that searches your docs, respects permissions, and reasons about what happened and when. How do you know it's actually doing those things and not just sounding convincing?
-
-That's the problem GroundEval solves. It scores LLM agents not just on whether the answer is right, but on whether they reached it through valid evidence. If your agent retrieves from memory, calls tools over documents, respects permissions, or reasons about time, you need to know whether it followed a valid path, not just whether the final answer sounded plausible.
+GroundEval is a deterministic evaluation harness for agents that act on state. You define what an agent must verify before acting, what evidence it is allowed to use, and what decision it must return. GroundEval runs the agent through a gated runtime, records the trajectory, and scores whether the action was justified by valid evidence.
 
 ## The problem with LLM judges
 
 An LLM judge can tell you if an answer looks reasonable. It cannot tell you if the agent:
 
-* cited a document it shouldn't have had access to
-* used information from after the question's cutoff time
-* skipped the search required to prove something didn't happen
-* mistook correlation for causation because two events happened close together
+- cited a document it should not have had access to
+- used information from after the question's cutoff time
+- skipped verifying a precondition before declaring it safe to act
+- claimed to find evidence that does not exist in the artifacts
 
-GroundEval answers these questions deterministically. The ground truth comes from state: event logs, artifact corpora, and access rules. Not from another model's judgment.
+GroundEval answers these questions deterministically. The ground truth comes from state, artifacts, access rules, and tool traces. Not from another model's judgment.
 
-## Three tracks, three questions
+## Three tracks, one run
 
-GroundEval ships with three evaluation tracks. Each tests a different kind of reasoning about state.
+GroundEval scores every task run through three tracks simultaneously. Each track tests a different failure mode against the same trajectory and answer.
 
-**PERSPECTIVE: Could the actor have known?** Tests whether the agent respects what a specific actor could see at a specific time. Catches failures like using artifacts outside the actor's visibility cone, using a subsystem their role cannot access, or using information created after the question's cutoff.
+**Counterfactual: Did the evidence support the causal claim?** Tests whether the agent's conclusion depends on a valid artifact-grounded relationship, not mere proximity or unsupported inference. If the agent claims an action was safe because all prerequisites passed, the scorer checks whether that causal or decision chain is supported by the evidence.
 
-> *Based only on what Morgan could access as of March 5, could Morgan have known that Acme was at churn risk?*
+**Silence: Did the agent verify all preconditions?** Tests whether the agent resolved every required condition before deciding or acting. A correct conclusion is not enough if a required precondition remained unresolved. The diagnostic trace can show shallow search, empty-result handling, and dead-end recovery, but the core Silence failure is acting with unresolved state.
 
-**COUNTERFACTUAL: Did X cause Y?** Tests whether the agent identifies the correct cause-and-effect relationship from the event log. Causal links are declared in the config with join conditions (shared ticket IDs, account IDs) so they don't rely on temporal adjacency alone. Two things happening close together isn't causation, and the scorer knows it.
+**Perspective: Did the agent stay within permission boundaries?** Tests whether the agent accessed only what its role allows. If a sales rep role only has `crm`, `email`, and `outreach_log` access, and the agent tried to access `audit_trail`, that is a violation. Horizon gates and actor visibility cones apply too.
 
-> *If the incident on March 5 had been resolved earlier, would the postmortem still have been created by the same person?*
+## How it works
 
-**SILENCE: Did the agent prove absence?** Tests whether the agent searched the required places before concluding something did not happen. A correct "no" isn't enough. The trajectory must show the expected search space was covered. If your team writes postmortems in Confluence and the agent only checked Jira, the answer is invalid even if no postmortem actually exists.
+1. **Define the task.** Declare what the agent is trying to decide or do, and what must be verified before it may act.
+2. **Provide the evidence world.** Use artifacts or an adapter-backed corpus to represent the state the agent should reason over.
+3. **Run the agent.** The agent searches, retrieves evidence, and submits a structured answer.
+4. **Get deterministic scores.** GroundEval scores the same run across Counterfactual, Silence, and Perspective, then writes a structured report.
 
-> *Was a postmortem documented for incident ESC-42?*
-
-## Start with the walkthroughs
-
-The README gives you the framework. These short essays show how to think about each failure mode before you wire GroundEval into your own agent.
-
-* **[How to test whether an agent checked before saying "no"](https://tenureai.dev/writing/how-to-test-agent-checked-before-saying-no/)**
-  Start here if your agent answers absence questions: no postmortem, no follow-up, no escalation, no record found. This walks through the Silence track and why a correct "no" still fails if the agent did not search the required places.
-
-* **[How to test what an AI agent was allowed to know](https://tenureai.dev/writing/how-to-test-agent-perspective/)**
-  Read this if your agent works across tools with role boundaries. This walks through the Perspective track and the difference between relevant evidence and permissible evidence.
-
-* **How to test whether an agent found the real cause**
-  Read this if your agent explains why something happened. This walks through the Counterfactual track and why temporal adjacency is not enough to prove causation.
-
+A correct answer through an invalid trajectory is a failure. GroundEval penalizes agents that reach the right conclusion through the wrong evidence, skipped verification, or out-of-bounds access.
 
 ## What gets scored
 
-Each question produces two scores:
+Each task run produces four scores:
 
 | Score | What it measures |
 |---|---|
-| `answer_score` | Did the final structured answer match ground truth? |
-| `trajectory_score` | Did the agent follow a valid evidence path? |
+| `counterfactual_score` | Did cited evidence support the agent's conclusions? |
+| `silence_score` | Did the agent verify all preconditions before deciding? |
+| `perspective_score` | Did the agent stay within permission boundaries? |
+| `overall_score` | Mean of the three track scores |
 
-The trajectory score checks different things depending on the track: subsystem coverage for SILENCE, visibility-cone discipline for PERSPECTIVE, causal mechanism identification for COUNTERFACTUAL. The combined score weights trajectory more heavily for tracks where the path is the point. A correct answer through an invalid trajectory is a failure.
+Each track reports an answer verdict and trajectory diagnostics. GroundEval ships with default scoring profiles. Advanced users can override track weights and penalties.
 
-Every evaluated question also includes a structured diagnostic trace. The trace records the agent run as data: tool calls, tool results, submitted answers, errors, and optional agent messages emitted between steps. Diagnostics are not used to award credit. The scorer still relies only on the deterministic trajectory. The diagnostic trace exists so you can debug why the score happened, without reconstructing it from interleaved logs.
+Every evaluated task also includes a structured diagnostic trace. The trace records the agent run as data: tool calls, tool results, submitted answers, and errors. Diagnostics are not used to award credit. The scorer still relies on the deterministic trajectory. The diagnostic trace exists so you can debug why the score happened without reconstructing it from interleaved logs.
 
-## What you bring, and what the framework handles
+## Quick start: run the bundled demo
 
-GroundEval separates what you bring from what the framework does.
+GroundEval ships with a complete demo so you can see the CLI, agent trajectory, deterministic scoring, and generated report without writing your own config or artifacts first.
 
-**You bring:**
+Before running the demo, configure a model provider.
 
-* An **event log**: a JSONL file of timestamped events with actors, artifact IDs, and facts. Generate one with an LLM in minutes for a synthetic scenario, or bring your own operational log.
-* An **artifact corpus**: the documents, tickets, messages, or records your agent retrieves from. Drop JSON files in a directory, or implement a thin adapter for your existing backend.
-* A **config**: around fifty lines of YAML declaring a few synthetic actors, their roles, and a handful of causal links or silence pairs that define correctness for your domain.
+For Anthropic:
 
-**The framework handles the rest:** question generation, gated tool access, trajectory recording, deterministic scoring, and per-question failure diagnostics.
-
-## Quick start
-
-Generate some events and artifacts, or use your own. The event log format is simple JSONL. Here's a minimal example:
-
-```jsonl
-{"id":"evt-001","type":"incident_opened","timestamp":"2026-03-05T10:00:00","actors":["alice"],"artifact_ids":{"jira":"ESC-42"},"facts":{"severity":"high"}}
-{"id":"evt-002","type":"postmortem_created","timestamp":"2026-03-07T14:30:00","actors":["alice","bob"],"artifact_ids":{"jira":"ESC-42","confluence":"CONF-9"},"facts":{}}
+```bash
+export ANTHROPIC_API_KEY=your_key_here
 ```
 
-Artifacts are JSON files in a directory:
+For OpenAI:
 
-```json
-{
-  "id": "ESC-42",
-  "timestamp": "2026-03-05T10:00:00",
-  "subsystem": "jira",
-  "title": "Customer escalation for Acme",
-  "body": "..."
-}
+```bash
+export OPENAI_API_KEY=your_key_here
 ```
 
-If you don't have your own data yet, ask an LLM: "Generate a 40-event log and matching artifacts for a customer-support domain with three actors over two weeks in March 2026." Drop the outputs into `events.jsonl` and `artifacts/`. You're ready.
+If you are using an OpenAI-compatible endpoint, also set:
 
-Then generate questions and run evaluation:
+```bash
+export OPENAI_BASE_URL=your_url_here
+```
+
+Then run:
 
 ```bash
 uv sync --group dev
-uv run python -m groundeval generate --config config/config.yaml --events events.jsonl
-uv run python -m groundeval eval --config config/config.yaml --questions eval_output/eval_questions.json --events events.jsonl
+uv run python -m groundeval task --config config/evaluation.yaml
 ```
 
-You'll get per-question scores with failure reasons, an aggregate summary, and trajectory diagnostics. Fix your agent, run again, compare.
+By default, the bundled demo uses the provider and model declared in `config/evaluation.yaml`.
 
-## Tool mode and context mode
-
-GroundEval supports two agent architectures.
-
-**Tool mode**: the framework creates a gated runtime. Your agent calls `runtime.fetch()` and `runtime.search()`. The runtime records every call, enforces visibility and temporal gates, and the trajectory scorer checks whether the trace was valid.
-
-**Context mode** (`--context-injection`): the framework packs relevant artifacts into the context window. Your agent answers from context without tool calls. The scorer checks citation discipline: did the agent cite the right artifacts and avoid citing irrelevant ones?
-
-Wire your agent by replacing `_build_agent_fn` in `groundeval/run.py`. The expected signature takes a question, context, tools, max_steps, and optional runtime, and returns a trajectory plus answer dict.
-
-## Example domains
-
-The `examples/` directory contains five ready-to-run evaluation scenarios. Each one is a complete domain: a config, an event log, and an artifact corpus. Copy any folder and you can generate questions and run an eval in under ten minutes.
-
-| Domain | Actors | What it tests |
-|---|---|---|
-| **enterprise-support** | 5 (engineer, sales, support lead, support agent) | Role-based access across Zendesk, Jira, Confluence, Slack, Salesforce, and Git. Escalation causality, postmortem silence gaps, churn detection chains |
-| **cybersecurity** | 5 (L1 analyst, L2 analyst, incident responder, security engineer, threat hunter) | Tiered SOC access control. Attack chain causality (phishing, credential theft, lateral movement, ransomware). Search discipline across Splunk, CrowdStrike, Jira, and Confluence |
-| **healthcare** | 6 (physician, nurse, pharmacist, billing specialist, care coordinator, patient advocate) | HIPAA-style access boundaries: billing can't see clinical notes, pharmacist can't see imaging, advocate can't see billing claims. Medication error causality, lab-to-treatment chains, discharge follow-up gaps |
-| **finance** | 5 (applicant, loan officer, underwriter, fraud analyst, compliance reviewer) | Temporal cutoff discipline (what was known at decision time). Role-based access to credit reports, fraud alerts, and underwriting notes. Regulatory silence checks for adverse action notices |
-| **legal** | 6 (associate, partner, client, opposing counsel, paralegal, compliance reviewer) | Privilege boundaries: opposing counsel cannot see matter notes or privileged docs. Citation discipline. Version-tracking across contract redlines. DPA and filing compliance gaps |
-
-Each domain exercises all three tracks.
-
-### Using an example
+To override the model from the CLI:
 
 ```bash
-# 1. Copy a domain
-cp -r examples/healthcare my-eval/
-cd my-eval/
-
-# 2. Generate questions
-uv run python -m groundeval generate --config config.yaml --events events.jsonl
-
-# 3. Run evaluation
-uv run python -m groundeval eval \
-  --config config.yaml \
-  --questions eval_output/eval_questions.json \
-  --events events.jsonl \
-  --model claude-sonnet-4-6
+uv run python -m groundeval task --config config/evaluation.yaml --model gpt-4o
 ```
 
-### Creating your own
+The demo runs a sales-outreach verification task. The agent searches the bundled evidence corpus, retrieves artifacts, submits a structured answer, and GroundEval scores the run across Counterfactual, Silence, and Perspective.
 
-Each domain needs exactly three things, and the examples show you the pattern:
+Results are written to:
 
-1. **config.yaml** (around 50 lines) declaring actors, roles, subsystems, causal links, and silence pairs
-2. **events.jsonl** (around 40 timestamped events with actor and artifact references)
-3. **artifacts/** (JSON files your agent retrieves, one per artifact ID)
+```bash
+eval_output/
+```
 
-If you don't have your own data yet, ask an LLM:
+You should see terminal output similar to:
 
-> "Generate a 40-event JSONL log and matching artifacts for a [your domain] with 4 actors over 2 weeks. Include a mix of causal chains and silent gaps."
+```text
+Task results written to eval_output/task_results_<model>.json
+Overall -- counterfactual=0.833  silence=0.750  perspective=1.000  overall=0.861  accuracy=1.000
+Total violations: 0
+```
 
-Drop the output in your folder and you're ready. The framework doesn't care whether the data came from an LLM prompt or a production event stream. The evaluation pipeline is the same.
+The JSON report includes per-task scores, precondition-level results, violation counts, tool trajectory, submitted answer, and diagnostic details.
+
+### Validate the demo config without running the agent
+
+```bash
+uv run python -m groundeval validate --config config/config.yaml
+```
+
+This checks that the config is well-formed, artifacts are present, and task contracts are valid before spending API credits.
+
+## What the demo includes
+
+The bundled demo includes everything needed for a first run:
+
+- a sample task contract
+- seed artifacts
+- role and subsystem permissions
+- provider settings
+- a built-in agent loop
+- deterministic scoring across all three tracks
+
+The demo is intentionally small. It exists to show how the CLI works, what a trajectory looks like, and what kind of report GroundEval generates.
+
+You do not need to copy the demo structure exactly for your own evaluations.
+
+## Configuring your own evaluation
+
+When you are ready to evaluate your own agent or domain, use the guides in `docs/`.
+
+Start here:
+
+- [`docs/crewai.md`](docs/crewai.md) for CrewAI integration
+- `docs/` for task contracts, artifacts, access policy, providers, and custom runners
+
+At a high level, a real evaluation defines:
+
+- what task the agent is trying to complete
+- what preconditions must be verified before acting
+- what evidence the agent is allowed to access
+- where ground truth comes from
+- how the agent runner is invoked
+- what structured answer the scorer should expect
+
+GroundEval does not require your artifacts to look like the demo artifacts. They can represent tickets, claims, alerts, contracts, medical orders, Slack messages, audit records, database rows, GitHub issues, notes, game state, home-lab logs, or any other state your agent reasons over.
+
+The important part is that the task contract points to the fields that define correctness, and the runtime records the evidence the agent actually searched, retrieved, and used.
+
+## Bringing your own agent
+
+GroundEval includes a built-in Anthropic/OpenAI agent loop so the demo can run immediately.
+
+For production-style evaluation, wire GroundEval to your own agent or framework. The scoring pipeline stays the same: GroundEval records the trajectory, validates access and evidence, and scores the result deterministically.
+
+See the integration guides in `docs/` for framework-specific setup.
+
+## Supported agent frameworks
+
+### CrewAI
+
+GroundEval ships with a first-class CrewAI adapter. Point GroundEval at your existing `@CrewBase` class, and the adapter loads your crew, wraps its tools through the gated runtime, records the trajectory, and scores Counterfactual, Silence, and Perspective from the same run.
+
+```bash
+uv sync --group dev --group crewai
+```
+
+[See the CrewAI integration guide →](docs/crewai.md)
 
 ## Extension points
 
-The framework is designed so you swap parts without rebuilding the engine.
+The framework is designed so you can swap parts without rebuilding the engine.
 
-| What you might replace | When you'd do it |
+| What you might replace | When you would do it |
 |---|---|
-| Event log and artifacts | You're testing your own domain instead of a synthetic scenario |
+| Artifacts | You already know your domain's preconditions and want to evaluate against your own state |
 | `CorpusAdapter` | Your artifacts live in MongoDB, Elasticsearch, Postgres, S3, or a proprietary backend |
-| `AccessPolicy` | Your visibility rules are tenant-scoped, project-scoped, or account-scoped |
-| Agent runner | You're using a specific model provider or agent framework |
-| Eval questions | You already have a benchmark and want deterministic trajectory scoring |
-| Causal links and silence pairs | Your domain has different correctness contracts |
+| `AccessPolicy` | Your visibility rules are tenant-scoped, project-scoped, account-scoped, or time-scoped |
+| Agent runner | You are using a specific model provider or agent framework |
+| Task contracts | Your domain has different precondition verification requirements |
 
 ## Design principles
 
-* **Ground truth comes from state, not an LLM judge.** Answer keys are derived from the event log, artifact corpus, and access policy. Question prose may be generated by an LLM, but the scoring path is deterministic.
-* **A correct answer through an invalid trajectory is a failure.** The framework penalizes agents that reach the right conclusion through the wrong evidence.
-* **The config declares domain truth; the framework handles mechanics.** You write YAML describing what correctness looks like in your domain. The engine handles generation, gating, recording, and scoring.
-* **Start synthetic, graduate to production.** You can run a full evaluation against generated data in under 15 minutes. When you're ready, swap in your real event log, artifacts, and access policy. The evaluation pipeline doesn't change.
+- **Ground truth comes from state, not an LLM judge.** Answer keys are derived from artifacts, access policy, and recorded trajectories. No LLM judge evaluates the agent's output.
+- **A correct answer through an invalid trajectory is a failure.** The framework penalizes agents that reach the right conclusion through wrong evidence, skipped verification, or out-of-bounds access.
+- **The config declares what to verify; the framework handles mechanics.** You describe the task and required checks. GroundEval handles gating, recording, and scoring.
+- **Local-first, adapter-ready.** GroundEval starts with a local demo so anyone can run an eval quickly. The same artifact interface can later point at a database, object store, or production retrieval backend.
+- **Start with the demo, graduate to your own evals.** Run the bundled demo to see the framework in action. When ready, swap in your own contracts, artifacts, policies, and agent.
 
 ## What this is not
 
 GroundEval does not replace human or model judgment for subjective quality: tone, style, persuasiveness, conversational fluency. It is for cases where correctness can be verified from state, evidence, permissions, and tool traces.
+
+## Preprint implementation
+
+The implementation used for the initial GroundEval preprint is preserved at:
+
+- Branch: `paper/preprint-2026`
+- Tag: `groundeval-preprint-v1`
+
+The `main` branch contains the simplified public version intended for easier adoption.
 
 ## Citation
 
@@ -191,7 +210,7 @@ If you use this work, please cite:
 
 ```bibtex
 @article{Jeffrey_Flynt_GroundEval_A_Deterministic_2026,
-author = {Jeffrey Flynt, Jeffrey Flynt},
+author = {Jeffrey Flynt},
 journal = {arXiv preprint},
 title = {{GroundEval: A Deterministic Replacement for LLM-as-Judge in Stateful Agent Evaluation}},
 url = {https://arxiv.org/abs/2606.22737},

@@ -1,8 +1,0 @@
-{
-  "id": "SL-401",
-  "timestamp": "2026-03-03T02:15:00",
-  "subsystem": "slack",
-  "channel": "soc-warroom",
-  "sender": "fatima",
-  "text": "SPLK-1001: lateral movement detected. FIN-DT-07 \u2192 HR-DB-02 via Pass-the-Hash. Marcus, we need immediate containment on both hosts. Naomi, prepare for credential rotation."
-}

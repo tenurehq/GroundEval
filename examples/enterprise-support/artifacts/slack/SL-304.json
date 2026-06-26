@@ -1,8 +1,0 @@
-{
-  "id": "SL-304",
-  "timestamp": "2026-03-08T14:30:00",
-  "subsystem": "slack",
-  "channel": "engineering",
-  "sender": "priya",
-  "text": "ESC-103: Globex reporting data inconsistency in their Q1 reports. James investigating."
-}
