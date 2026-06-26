@@ -1,6 +1,5 @@
 logs/
 /artifacts
-/config.yaml
 /config2.yaml
 eval_output/
 
