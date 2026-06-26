@@ -195,6 +195,15 @@ The framework is designed so you can swap parts without rebuilding the engine.
 
 GroundEval does not replace human or model judgment for subjective quality: tone, style, persuasiveness, conversational fluency. It is for cases where correctness can be verified from state, evidence, permissions, and tool traces.
 
+## Preprint implementation
+
+The implementation used for the initial GroundEval preprint is preserved at:
+
+- Branch: `paper/preprint-2026`
+- Tag: `groundeval-preprint-v1`
+
+The `main` branch contains the simplified public version intended for easier adoption.
+
 ## Citation
 
 If you use this work, please cite:
