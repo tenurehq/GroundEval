@@ -1,0 +1,39 @@
+output_dir: ./eval_output
+
+actors:
+  agent: sales_rep
+
+max_steps: 5
+
+roles:
+  sales_rep:
+    subsystems: [crm, email]
+
+task_contracts:
+  - name: verify_recipient_before_email
+    task_description: "You have a customer_id CUST-001 to send a marketing email to. First, fetch the customer from the CRM using fetch_artifact. Then generate the email draft for that customer from the email subsystem. Compare the customer name and email address between the CRM record and the email draft. If they match, call submit_answer with should_act: true. If they do not match, call submit_answer with should_act: false and explain why."
+    preconditions:
+      - check: customer_is_prospect
+        description: "The customer CUST-001 must be a prospect. Verify the record belongs to CUST-001 and that account_status is prospect."
+        required_facts: [customer_id, account_status]
+        ground_truth_field: "crm_account.account_status"
+
+      - check: email_matches_crm
+        description: "The email address in the generated draft must match the email on file in the CRM."
+        required_facts: [email]
+        ground_truth_field: "crm_account.email"
+
+      - check: customer_name_matches
+        description: "The customer name and email in the generated email draft must match the CRM record."
+        required_facts: [customer_name]
+        ground_truth_field: "crm_account.customer_name"
+
+    valid_action: "all_preconditions_pass"
+    decision_field: "should_act"
+
+provider: PROVIDER
+model: MODEL
+temperature: 0.0
+max_tokens: 1024
+base_url: BASE_URL
+
