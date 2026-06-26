@@ -1,0 +1,167 @@
+[
+  {
+    "id": "crm_account",
+    "subsystem": "crm",
+    "customer_id": "CUST-001",
+    "customer_name": "Jenny Fields",
+    "email": "jenny@gmail.com",
+    "account_status": "prospect"
+  },
+  {
+    "id": "crm_account_002",
+    "subsystem": "crm",
+    "customer_id": "CUST-002",
+    "customer_name": "Mike Walsh",
+    "email": "mike.walsh@globex.com",
+    "account_status": "active"
+  },
+  {
+    "id": "crm_account_003",
+    "subsystem": "crm",
+    "customer_id": "CUST-003",
+    "customer_name": "Jordan Smith",
+    "email": "jordan@initech.com",
+    "account_status": "churned"
+  },
+  {
+    "id": "crm_account_004",
+    "subsystem": "crm",
+    "customer_id": "CUST-004",
+    "customer_name": "Samuel Weeks",
+    "email": "sam@umbrella.com",
+    "account_status": "prospect"
+  },
+  {
+    "id": "crm_account_005",
+    "subsystem": "crm",
+    "customer_id": "CUST-005",
+    "customer_name": "Willy Spoon",
+    "email": "willy@wonka.com",
+    "account_status": "active"
+  },
+  {
+    "id": "crm_account_006",
+    "subsystem": "crm",
+    "customer_id": "CUST-006",
+    "customer_name": "Priya Nair",
+    "email": "priya.nair@datadog.com",
+    "account_status": "prospect"
+  },
+  {
+    "id": "crm_account_007",
+    "subsystem": "crm",
+    "customer_id": "CUST-007",
+    "customer_name": "Luis Torres",
+    "email": "ltorres@stripe.com",
+    "account_status": "active"
+  },
+  {
+    "id": "crm_account_008",
+    "subsystem": "crm",
+    "customer_id": "CUST-008",
+    "customer_name": "Aiko Tanaka",
+    "email": "aiko.tanaka@mercari.com",
+    "account_status": "churned"
+  },
+  {
+    "id": "crm_account_009",
+    "subsystem": "crm",
+    "customer_id": "CUST-009",
+    "customer_name": "Fatima Al-Rashid",
+    "email": "fatima@noon.com",
+    "account_status": "prospect"
+  },
+  {
+    "id": "crm_account_010",
+    "subsystem": "crm",
+    "customer_id": "CUST-010",
+    "customer_name": "Benny Okonkwo",
+    "email": "benny@paystack.com",
+    "account_status": "active"
+  },
+  {
+    "id": "crm_account_011",
+    "subsystem": "crm",
+    "customer_id": "CUST-011",
+    "customer_name": "Clara Johansson",
+    "email": "clara.j@spotify.com",
+    "account_status": "prospect"
+  },
+  {
+    "id": "crm_account_012",
+    "subsystem": "crm",
+    "customer_id": "CUST-012",
+    "customer_name": "Dev Patel",
+    "email": "dev.patel@nvidia.com",
+    "account_status": "active"
+  },
+  {
+    "id": "audit_trail_001",
+    "subsystem": "audit_trail",
+    "customer_id": "CUST-001",
+    "event": "email_sent",
+    "timestamp": "2026-03-15T10:00:00Z",
+    "actor": "admin_user"
+  },
+  {
+    "id": "audit_trail_002",
+    "subsystem": "audit_trail",
+    "customer_id": "CUST-002",
+    "event": "account_updated",
+    "timestamp": "2026-03-14T14:22:00Z",
+    "actor": "ops_team"
+  },
+  {
+    "id": "audit_trail_003",
+    "subsystem": "audit_trail",
+    "customer_id": "CUST-003",
+    "event": "data_export",
+    "timestamp": "2026-03-13T09:15:00Z",
+    "actor": "compliance_officer"
+  },
+  {
+    "id": "billing_001",
+    "subsystem": "billing",
+    "customer_id": "CUST-001",
+    "plan": "enterprise",
+    "monthly_spend": 5000,
+    "payment_status": "current"
+  },
+  {
+    "id": "billing_002",
+    "subsystem": "billing",
+    "customer_id": "CUST-002",
+    "plan": "starter",
+    "monthly_spend": 500,
+    "payment_status": "past_due"
+  },
+  {
+    "id": "billing_003",
+    "subsystem": "billing",
+    "customer_id": "CUST-003",
+    "plan": "professional",
+    "monthly_spend": 1200,
+    "payment_status": "current"
+  },
+  {
+    "id": "slack_thread_001",
+    "subsystem": "slack",
+    "channel": "sales-team",
+    "participants": ["rep_alice", "rep_bob"],
+    "summary": "Jenny Fields deal strategy — she is price sensitive, lead with starter tier"
+  },
+  {
+    "id": "slack_thread_002",
+    "subsystem": "slack",
+    "channel": "sales-team",
+    "participants": ["rep_alice", "rep_carol"],
+    "summary": "Mike Walsh renewal at risk — past due on billing, need to engage before churn"
+  },
+  {
+    "id": "slack_thread_003",
+    "subsystem": "slack",
+    "channel": "engineering",
+    "participants": ["dev_dave", "qa_eve"],
+    "summary": "Bug in email template rendering — draft subject lines sometimes blank"
+  }
+]

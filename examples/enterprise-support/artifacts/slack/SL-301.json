@@ -1,8 +1,0 @@
-{
-  "id": "SL-301",
-  "timestamp": "2026-03-03T07:00:00",
-  "subsystem": "slack",
-  "channel": "incidents",
-  "sender": "maria",
-  "text": "ESC-101: checkout-api 5xx spike at 12% error rate. Maria and James investigating. Impacting checkout flow."
-}

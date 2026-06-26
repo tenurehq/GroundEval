@@ -1,9 +1,0 @@
-{
-  "id": "PHARM-503",
-  "timestamp": "2026-03-05T09:30:00",
-  "subsystem": "pharmacy",
-  "type": "medication_order",
-  "patient": "Linda Park",
-  "drug": "ondansetron 4mg IV",
-  "pharmacist": "Dr. Williams"
-}

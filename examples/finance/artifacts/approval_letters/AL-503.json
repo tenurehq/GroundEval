@@ -1,9 +1,0 @@
-{
-  "id": "AL-503",
-  "timestamp": "2026-03-09T09:00:00",
-  "subsystem": "approval_letters",
-  "application": "CRM-1003",
-  "type": "adverse_action",
-  "reason": "Income could not be verified to meet DTI requirements. ECOA notice enclosed.",
-  "status": "sent"
-}

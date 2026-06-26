@@ -1,3 +1,5 @@
-from groundeval.run import main
+"""Entry point for `python -m groundeval`."""
+from .run import main
 
-main()
+if __name__ == "__main__":
+    main()

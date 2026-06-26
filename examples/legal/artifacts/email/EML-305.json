@@ -1,9 +1,0 @@
-{
-  "id": "EML-305",
-  "timestamp": "2026-03-06T08:00:00",
-  "subsystem": "email",
-  "from": "partner_kim",
-  "to": "client_acme_rep",
-  "subject": "Gamma-Delta counter",
-  "body": "Counter at $40. Room to $45 per strategy."
-}

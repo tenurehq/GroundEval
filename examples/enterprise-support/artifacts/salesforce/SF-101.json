@@ -1,9 +1,0 @@
-{
-  "id": "SF-101",
-  "timestamp": "2026-03-10T08:00:00",
-  "subsystem": "salesforce",
-  "type": "account",
-  "account_name": "Acme Corp",
-  "health_score": 72,
-  "notes": "Health score dropped from 92 to 72 during checkout outage. Recovered to 88 post-resolution."
-}

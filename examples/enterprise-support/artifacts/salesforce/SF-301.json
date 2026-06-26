@@ -1,9 +1,0 @@
-{
-  "id": "SF-301",
-  "timestamp": "2026-03-15T08:00:00",
-  "subsystem": "salesforce",
-  "type": "alert",
-  "account_name": "Hooli",
-  "health_score": 55,
-  "notes": "Health score dropped to 55 after rate-limiting incident. Account flagged for churn risk review."
-}

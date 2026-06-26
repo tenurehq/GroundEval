@@ -1,9 +1,0 @@
-{
-  "id": "IMG-202",
-  "timestamp": "2026-03-07T13:00:00",
-  "subsystem": "imaging",
-  "type": "ct_head",
-  "patient": "Robert Chen",
-  "finding": "Acute subdural hematoma (8mm thickness) with 3mm midline shift. Neurosurgery consult STAT.",
-  "flagged": "critical"
-}

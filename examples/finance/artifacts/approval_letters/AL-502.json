@@ -1,9 +1,0 @@
-{
-  "id": "AL-502",
-  "timestamp": "2026-03-07T10:00:00",
-  "subsystem": "approval_letters",
-  "application": "CRM-1002",
-  "type": "adverse_action",
-  "reason": "Unable to verify financial information provided. ECOA notice enclosed.",
-  "status": "sent"
-}

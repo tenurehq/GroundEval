@@ -1,8 +1,0 @@
-{
-  "id": "UN-402",
-  "timestamp": "2026-03-05T10:00:00",
-  "subsystem": "underwriting_notes",
-  "application": "CRM-1002",
-  "underwriter": "Garcia",
-  "notes": "FLAGGED: Fraud alert active. Bank statements appear altered. Hold for fraud investigation outcome before decision."
-}

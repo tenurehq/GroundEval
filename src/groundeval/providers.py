@@ -2,63 +2,12 @@
 Model provider layer. Two providers built-in: Anthropic and OpenAI.
 Extend by subclassing ModelProvider.
 
-TWO DISTINCT USES
------------------
-1. Prose generation (question text rewriting during `generate`)
-   - Single turn, short completion, no tools
-   - Called via provider.complete(prompt, max_tokens)
-
-2. Agent loop (running the model against eval questions during `eval`)
-   - Multi-turn with tool calls (fetch_artifact, search_artifacts)
-   - Structured JSON final answer required (enforced via expected_answer_schema)
-   - Called via provider.run_agent(question, context, runtime, max_steps)
-   - Returns (AgentTrajectory, dict)
-
-
-ANTHROPIC IMPLEMENTATION NOTES
--------------------------------
-The Anthropic provider uses two SDK features instead of a hand-rolled loop:
-
-- Tool Runner (`client.beta.messages.tool_runner()`): handles the
-  request/response cycle, conversation state, and tool dispatch. We define
-  `fetch_artifact` and `search_artifacts` as `@beta_tool`-decorated closures
-  over the question's `GatedRuntime` and let the runner drive the loop. We
-  iterate manually (rather than draining the whole runner) so we can stop
-  the instant `submit_answer` is called and enforce `max_steps` ourselves.
-- Strict tool use (`strict: true` on `submit_answer`): the answer schema
-  varies per question (`expected_answer_schema`, falling back to
-  `ANSWER_SCHEMAS[question_type]`), so we build the `submit_answer` tool
-  definition per-question rather than reusing one static definition, and
-  compile it into a strict-compliant schema (`additionalProperties: false`
-  injected at every object level) before sending it. This guarantees the
-  `answer` dict Claude returns already matches the expected schema, so we
-  no longer need to regex-scrape JSON out of free text on this path.
-
-The OpenAI provider is unaffected by either of the above — both are
-Anthropic-specific SDK/API features — and keeps its original hand-rolled
-loop and the `_extract_json_from_text` fallback.
-
-`expected_answer_schema` / `ANSWER_SCHEMAS` remain the single, provider-
-agnostic contract used for scoring and for every other provider. Strict mode
-only changes how the Anthropic provider *enforces* that same schema; it does
-not introduce an Anthropic-specific schema.
-
-LAST-STEP FORCED ANSWER
------------------------
-Both providers now inject a final-answer tool on the last allowed step,
-mirroring the OrgForge harness pattern:
-
-- Anthropic: rebuilds the tool runner with only `submit_answer` available
-  and injects a user message instructing the model this is its last turn.
-- OpenAI: filters `tools` to only `submit_answer` and uses model-specific
-  `tool_choice`. Native OpenAI models work with `"auto"` and a single tool.
-  Models routed through Azure that are actually Mistral/Qwen/Llama behind
-  the endpoint need `"required"` to force a tool call when only one tool
-  is available.
-
-`budget_exceeded` is set on the trajectory when the loop exhausts
-`max_steps` without `answer_submitted` being true.
-
+SINGLE USE: Agent loop
+----------------------
+- Multi-turn with tool calls (fetch_artifact, search_artifacts)
+- Structured JSON final answer required (enforced via expected_answer_schema)
+- Called via provider.run_agent(question_text, ..., runtime, max_steps)
+- Returns (AgentTrajectory, dict)
 """
 
 from __future__ import annotations
@@ -71,190 +20,23 @@ import os
 import time
 from abc import ABC, abstractmethod
 from typing import Any, cast
+from json_repair import loads as repair_loads
 
 from .core import (
     AgentTrajectory,
-    EvalQuestion,
     GatedRuntime,
-    ANSWER_SCHEMAS,
+    ANSWER_SCHEMA_TASK,
 )
 
 logger = logging.getLogger("groundeval.providers")
 
 
-_TOOLS_FETCH_AND_SEARCH = [
-    {
-        "name": "fetch_artifact",
-        "description": (
-            "Retrieve a single artifact by its ID. "
-            "Returns the artifact dict or null if not found or gated."
-        ),
-        "input_schema": {
-            "type": "object",
-            "required": ["artifact_id"],
-            "properties": {
-                "artifact_id": {
-                    "type": "string",
-                    "description": "The artifact ID to fetch.",
-                }
-            },
-        },
-    },
-    {
-        "name": "search_artifacts",
-        "description": (
-            "Full-text search over the artifact corpus. "
-            "Returns a list of matching artifact dicts. "
-            "Use filters to narrow results when you know the subsystem, "
-            "actor, or time window you're interested in."
-        ),
-        "input_schema": {
-            "type": "object",
-            "required": ["query"],
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search terms or artifact ID.",
-                },
-                "artifact_type": {
-                    "type": "string",
-                    "description": (
-                        "Optional subsystem filter. Examples: 'jira', 'confluence', "
-                        "'slack', 'email', 'zendesk', 'git'. Restricts results to "
-                        "artifacts from the specified subsystem."
-                    ),
-                },
-                "actor": {
-                    "type": "string",
-                    "description": (
-                        "Optional actor filter. Only return artifacts associated "
-                        "with this actor. Useful when investigating what a specific "
-                        "person did or had access to."
-                    ),
-                },
-                "from_date": {
-                    "type": "string",
-                    "description": (
-                        "Optional lower bound on artifact timestamp. "
-                        "ISO date (YYYY-MM-DD) or full ISO-8601 string. "
-                        "Only return artifacts created on or after this date. "
-                        "Combine with the system's time horizon to narrow to "
-                        "a specific investigation window."
-                    ),
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max results (default 10, max 50).",
-                    "default": 10,
-                },
-            },
-        },
-    },
-]
-
-_TOOLS_OPENAI_BASE = [
-    {
-        "type": "function",
-        "function": {
-            "name": t["name"],
-            "description": t["description"],
-            "parameters": t["input_schema"],
-        },
-    }
-    for t in _TOOLS_FETCH_AND_SEARCH
-]
-
-
-def _build_tools_for_corpus(
-    subsystems: list[str],
-) -> list[dict]:
-    """Build fetch_artifact and search_artifacts tool definitions with the
-    actual subsystem list from the corpus baked into artifact_type's enum."""
-    valid_subsystems = sorted(set(s for s in subsystems if s))
-    enum_desc = (
-        f"Must be one of: {', '.join(valid_subsystems)}."
-        if valid_subsystems
-        else "No subsystems available."
-    )
-
-    return [
-        {
-            "name": "fetch_artifact",
-            "description": (
-                "Retrieve a single artifact by its ID. "
-                "Returns the artifact dict or null if not found or gated."
-            ),
-            "input_schema": {
-                "type": "object",
-                "required": ["artifact_id"],
-                "properties": {
-                    "artifact_id": {
-                        "type": "string",
-                        "description": "The artifact ID to fetch.",
-                    }
-                },
-            },
-        },
-        {
-            "name": "search_artifacts",
-            "description": (
-                "Full-text search over the artifact corpus. "
-                "Returns a list of matching artifact dicts. "
-                "You MUST specify the subsystem to search within."
-            ),
-            "input_schema": {
-                "type": "object",
-                "required": ["query", "artifact_type"],
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search terms or artifact ID.",
-                    },
-                    "artifact_type": {
-                        "type": "string",
-                        "enum": valid_subsystems,
-                        "description": (
-                            f"REQUIRED. The subsystem to search within. {enum_desc}"
-                        ),
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Max results (default 10, max 50).",
-                        "default": 10,
-                    },
-                },
-            },
-        },
-    ]
-
-
-def _build_openai_tools(subsystems: list[str]) -> list[dict]:
-    """Build OpenAI-compatible tool definitions with dynamic subsystem enum."""
-    tools = _build_tools_for_corpus(subsystems)
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": t["name"],
-                "description": t["description"],
-                "parameters": t["input_schema"],
-            },
-        }
-        for t in tools
-    ]
-
-
 def _to_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """
-    Compile an ANSWER_SCHEMAS-style JSON Schema into a strict-tool-use
-    compliant schema.
+    Compile a JSON Schema into a strict-tool-use compliant schema.
 
-    Strict mode (https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use)
-    requires `additionalProperties: false` on every object node, not just
-    the root. ANSWER_SCHEMAS / expected_answer_schema are written as plain
-    JSON Schema for general provider-agnostic use, so we deep-copy and
-    inject that constraint here rather than requiring every schema author
-    to know about Anthropic's strict-mode requirements.
+    Strict mode requires `additionalProperties: false` on every object node.
+    We deep-copy and inject that constraint here.
     """
     compiled = copy.deepcopy(schema)
 
@@ -274,16 +56,14 @@ def _to_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return compiled
 
 
-def _build_submit_answer_tool(question: EvalQuestion) -> dict[str, Any]:
+def _build_submit_answer_tool(
+    expected_answer_schema: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
-    Build the submit_answer tool definition for this question, with
-    strict: true so the `answer` field is guaranteed to match the
-    question's expected_answer_schema (or the track default) before it
-    ever reaches us.
+    Build the submit_answer tool definition with strict: true.
+    Uses the provided schema or falls back to ANSWER_SCHEMA_TASK.
     """
-    schema = question.expected_answer_schema or ANSWER_SCHEMAS.get(
-        question.question_type, {}
-    )
+    schema = expected_answer_schema or ANSWER_SCHEMA_TASK
     answer_schema = _to_strict_schema(schema) if schema else {"type": "object"}
 
     return {
@@ -307,7 +87,7 @@ class ModelProvider(ABC):
     Base class for model providers.
 
     Subclass this to add new providers (Gemini, Mistral, etc.).
-    The two methods to implement are complete() and run_agent().
+    The method to implement is run_agent().
     """
 
     def __init__(self, model: str, api_key: str | None = None, **kwargs):
@@ -317,31 +97,32 @@ class ModelProvider(ABC):
         self.max_tokens = int(kwargs.get("max_tokens", 1024))
 
     @abstractmethod
-    def complete(self, prompt: str, max_tokens: int = 2056) -> str:
-        """
-        Single-turn completion. Used for question prose generation.
-        Returns the response text.
-        """
-        ...
-
-    @abstractmethod
     def run_agent(
         self,
-        question: EvalQuestion,
+        task_id: str,
+        question_text: str,
         context: str | None,
         runtime: GatedRuntime | None,
         max_steps: int = 5,
+        expected_answer_schema: dict[str, Any] | None = None,
+        actor: str | None = None,
+        actor_role: str | None = None,
+        as_of_time: str | None = None,
     ) -> tuple[AgentTrajectory, dict[str, Any]]:
         """
-        Run the agent loop against a single question.
+        Run the agent loop against a single task.
 
+        - task_id: unique identifier for this run (used in trajectory)
+        - question_text: the task description + preconditions text
         - context: pre-built string of artifact text (context-injection mode)
         - runtime: GatedRuntime providing gated fetch/search (tool mode)
+        - max_steps: maximum tool call turns
+        - expected_answer_schema: JSON schema for the answer (defaults to ANSWER_SCHEMA_TASK)
+        - actor, actor_role, as_of_time: optional perspective metadata
+
         Exactly one of context or runtime will be non-None.
 
         Returns (trajectory, final_answer_dict).
-        The trajectory's tool_calls will be populated by GatedRuntime if
-        runtime is provided; the caller in run.py merges them back.
         """
         ...
 
@@ -393,11 +174,15 @@ class ModelProvider(ABC):
 
 
 def _build_system_prompt(
-    question: EvalQuestion, context: str | None, max_steps: int = 5
+    question_text: str,
+    context: str | None,
+    max_steps: int = 5,
+    expected_answer_schema: dict[str, Any] | None = None,
+    actor: str | None = None,
+    actor_role: str | None = None,
+    as_of_time: str | None = None,
 ) -> str:
-    schema = question.expected_answer_schema or ANSWER_SCHEMAS.get(
-        question.question_type, {}
-    )
+    schema = expected_answer_schema or ANSWER_SCHEMA_TASK
     schema_str = json.dumps(schema, indent=2)
 
     parts = [
@@ -405,18 +190,18 @@ def _build_system_prompt(
         "available artifacts. You reason carefully over artifacts to answer complex questions. "
         "You cite evidence by artifact ID, stay within stated constraints, and never guess. "
         "You have access to the full conversation history. Never call a tool to retrieve "
-        "an artifact you have already retrieved in a previous step. Re-read the earlier result instead."
+        "an artifact you have already retrieved in a previous step. Re-read the earlier result instead. "
         "When you have enough information, call submit_answer "
         "with a JSON object matching the required schema. ",
-        f"\nQuestion type: {question.question_type}",
+        f"\nQuestion type: TASK",
         f"\nRequired answer schema:\n{schema_str}",
     ]
 
-    if question.question_type == "PERSPECTIVE" and question.actor:
+    if actor:
         parts.append(
-            f"\nYou are reasoning from the perspective of: {question.actor} "
-            f"(role: {question.actor_role or 'unknown'}) "
-            f"as of: {(question.as_of_time or '')[:10]}. "
+            f"\nYou are reasoning from the perspective of: {actor} "
+            f"(role: {actor_role or 'unknown'}) "
+            f"as of: {(as_of_time or '')[:10]}. "
             f"Only consider information accessible to this actor at that time."
         )
 
@@ -452,7 +237,7 @@ def _dispatch_tool(
 
     if tool_name == "fetch_artifact":
         result = runtime.fetch(tool_input.get("artifact_id", ""))
-        return result if result is not None else {"error": "not found or gated"}
+        return result if result is not None else {}
 
     if tool_name == "search_artifacts":
         results = runtime.search(
@@ -461,6 +246,16 @@ def _dispatch_tool(
             limit=int(tool_input.get("limit", 10)),
         )
         return results
+
+    if tool_name == "generate_email":
+        customer_id = tool_input.get("customer_id", "")
+        return {
+            "customer_id": customer_id,
+            "customer_name": "Jenny Fields",
+            "email": "jenny@gmail.com",
+            "subject": "Exclusive offer for Jenny Fields",
+            "body": "Dear Jenny Fields, we have a special offer for you...",
+        }
 
     return {"error": f"unknown tool: {tool_name}"}
 
@@ -471,19 +266,12 @@ class AnthropicProvider(ModelProvider):
 
     Tool use: driven by `client.beta.messages.tool_runner()`. fetch_artifact
     and search_artifacts are defined as `@beta_tool`-decorated closures over
-    the question's GatedRuntime, so the runner can call them directly
-    instead of us hand-dispatching tool_use blocks.
+    the GatedRuntime.
 
-    Structured output: enforced via submit_answer with strict: true. The
-    tool's input_schema is compiled per-question from
-    question.expected_answer_schema (or ANSWER_SCHEMAS[question_type]), so
-    the `answer` field the model returns is already guaranteed to match the
-    expected schema — no post-hoc JSON extraction or validation needed on
-    this path.
+    Structured output: enforced via submit_answer with strict: true.
 
     Last-step forcing: on the final turn, the tool runner is rebuilt with
-    only submit_answer available and a user message instructs the model
-    this is its last turn.
+    only submit_answer available.
     """
 
     def __init__(self, model: str, api_key: str | None = None, **kwargs):
@@ -500,31 +288,30 @@ class AnthropicProvider(ModelProvider):
                 "anthropic package not installed. Run: pip install anthropic"
             )
 
-    def complete(self, prompt: str, max_tokens: int = 2056) -> str:
-        response = self._client.messages.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            temperature=self.temperature,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text if response.content else ""
-
     def run_agent(
         self,
-        question: EvalQuestion,
+        task_id: str,
+        question_text: str,
         context: str | None,
         runtime: GatedRuntime | None,
         max_steps: int = 5,
+        expected_answer_schema: dict[str, Any] | None = None,
+        actor: str | None = None,
+        actor_role: str | None = None,
+        as_of_time: str | None = None,
     ) -> tuple[AgentTrajectory, dict[str, Any]]:
-        trajectory = AgentTrajectory(
-            question_id=question.question_id,
-            question_type=question.question_type,
-        )
+        trajectory = AgentTrajectory(task_id=task_id)
 
-        system = _build_system_prompt(question, context, max_steps)
-        messages: list[dict[str, Any]] = [
-            {"role": "user", "content": question.question_text}
-        ]
+        system = _build_system_prompt(
+            question_text=question_text,
+            context=context,
+            max_steps=max_steps,
+            expected_answer_schema=expected_answer_schema,
+            actor=actor,
+            actor_role=actor_role,
+            as_of_time=as_of_time,
+        )
+        messages: list[dict[str, Any]] = [{"role": "user", "content": question_text}]
 
         subsystem_list = runtime.all_subsystems if runtime is not None else []
 
@@ -552,7 +339,7 @@ class AnthropicProvider(ModelProvider):
                 return json.dumps({"error": "No runtime available for tool calls"})
             result = runtime.fetch(artifact_id)
             return json.dumps(
-                result if result is not None else {"error": "not found or gated"},
+                result if result is not None else {},
                 default=str,
             )
 
@@ -580,7 +367,18 @@ class AnthropicProvider(ModelProvider):
             results = runtime.search(query=query, artifact_type=at, limit=int(limit))
             return json.dumps(results, default=str)
 
-        submit_answer_def = _build_submit_answer_tool(question)
+        @beta_tool
+        def generate_email(customer_id: str) -> str:
+            draft = {
+                "customer_id": customer_id,
+                "customer_name": "Jenny Fields",
+                "email": "jenny@gmail.com",
+                "subject": "Exclusive offer for Jenny Fields",
+                "body": "Dear Jenny Fields, we have a special offer for you...",
+            }
+            return json.dumps(draft)
+
+        submit_answer_def = _build_submit_answer_tool(expected_answer_schema)
         tools: list[Any] = [submit_answer_def]
         if runtime is not None:
             tools = [fetch_artifact, search_artifacts, submit_answer_def]
@@ -660,12 +458,7 @@ class OpenAIProvider(ModelProvider):
     as a fallback if the model doesn't call submit_answer.
 
     Last-step forcing: on the final turn, tools are filtered to only
-    submit_answer. Model-specific tool_choice:
-    - Native OpenAI / Azure OpenAI: "auto" with a single tool works.
-    - Mistral/Qwen/Llama behind Azure: "required" forces a tool call when
-      only one tool is available. Detected from base_url and model name.
-
-    API key:  OPENAI_API_KEY env var, or api_key in config.
+    submit_answer.
     """
 
     def __init__(self, model: str, api_key: str | None = None, **kwargs):
@@ -685,9 +478,7 @@ class OpenAIProvider(ModelProvider):
         self._model_lower = self.model.lower()
 
     def _is_non_openai_model(self) -> bool:
-        """Returns True if the endpoint is likely routing to a non-OpenAI model
-        (Mistral, Qwen, Llama, Ollama) that needs tool_choice='required' to
-        force a tool call when only one tool is available."""
+        """Returns True if the endpoint is likely routing to a non-OpenAI model."""
         url_lower = self._base_url.lower() if self._base_url else ""
         model_lower = self._model_lower
         non_openai_markers = {
@@ -705,46 +496,35 @@ class OpenAIProvider(ModelProvider):
             m in model_lower for m in non_openai_markers
         )
 
-    def complete(self, prompt: str, max_tokens: int = 2056) -> str:
-        response = self._client.chat.completions.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            temperature=self.temperature,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        choice = response.choices[0]
-        content = choice.message.content or ""
-        if not content:
-            logger.warning(
-                "[providers] Empty completion content. "
-                f"finish_reason={choice.finish_reason!r} "
-                f"message={choice.message!r} "
-                f"usage={response.usage!r}"
-            )
-        return content
-
     def run_agent(
         self,
-        question: EvalQuestion,
+        task_id: str,
+        question_text: str,
         context: str | None,
         runtime: GatedRuntime | None,
         max_steps: int = 5,
+        expected_answer_schema: dict[str, Any] | None = None,
+        actor: str | None = None,
+        actor_role: str | None = None,
+        as_of_time: str | None = None,
     ) -> tuple[AgentTrajectory, dict[str, Any]]:
-        trajectory = AgentTrajectory(
-            question_id=question.question_id,
-            question_type=question.question_type,
-        )
+        trajectory = AgentTrajectory(task_id=task_id)
 
-        system = _build_system_prompt(question, context, max_steps)
+        system = _build_system_prompt(
+            question_text=question_text,
+            context=context,
+            max_steps=max_steps,
+            expected_answer_schema=expected_answer_schema,
+            actor=actor,
+            actor_role=actor_role,
+            as_of_time=as_of_time,
+        )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
-            {"role": "user", "content": question.question_text},
+            {"role": "user", "content": question_text},
         ]
 
-        answer_schema = question.expected_answer_schema or ANSWER_SCHEMAS.get(
-            question.question_type, {}
-        )
+        answer_schema = expected_answer_schema or ANSWER_SCHEMA_TASK
         submit_answer_tool = {
             "type": "function",
             "function": {
@@ -828,6 +608,26 @@ class OpenAIProvider(ModelProvider):
                         },
                     },
                 },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "generate_email",
+                        "description": (
+                            "Generate an email draft for a given customer ID. "
+                            "Returns the draft with customer_name, email_address, subject, and body."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "required": ["customer_id"],
+                            "properties": {
+                                "customer_id": {
+                                    "type": "string",
+                                    "description": "The customer ID to generate an email draft for.",
+                                }
+                            },
+                        },
+                    },
+                },
             ]
             tools = dynamic_base + [submit_answer_tool]
         else:
@@ -873,8 +673,17 @@ class OpenAIProvider(ModelProvider):
                     parallel_tool_calls=False,
                 )
             except Exception as exc:
-                logger.error(f"OpenAI API error on step {step}: {exc}")
-                break
+                status_code = getattr(exc, "status_code", None)
+                if status_code in (401, 403):
+                    logger.error(f"OpenAI auth error: {exc}")
+                    raise SystemExit(
+                        f"Authentication failed (HTTP {status_code}). "
+                        "Check your api_key in config.yaml or the "
+                        "OPENAI_API_KEY environment variable."
+                    )
+                raise
+
+            print(response)
 
             if response.usage:
                 prompt_tokens += response.usage.prompt_tokens
@@ -893,9 +702,10 @@ class OpenAIProvider(ModelProvider):
                     if fn is None:
                         continue
                     fn_name = fn.name
+
                     try:
-                        fn_input = json.loads(fn.arguments)
-                    except json.JSONDecodeError:
+                        fn_input = repair_loads(fn.arguments)
+                    except Exception:
                         fn_input = {}
 
                     if fn_name == "submit_answer":
@@ -934,54 +744,40 @@ class OpenAIProvider(ModelProvider):
 
 
 def _extract_json_from_text(text: str) -> dict[str, Any]:
-    """
-    Last-resort extraction of a JSON object from free-form model output.
-    Looks for the last {...} block in the text.
-    """
-    import re
-
-    matches = list(re.finditer(r"\{[^{}]*\}", text, re.DOTALL))
-    for m in reversed(matches):
-        try:
-            return json.loads(m.group())
-        except json.JSONDecodeError:
-            continue
-    try:
-        return json.loads(text.strip())
-    except json.JSONDecodeError:
-        logger.warning("Could not extract JSON from model output")
+    if not text or not text.strip():
         return {}
 
-
-def build_prose_fn(provider: ModelProvider):
-    """
-    Returns a llm_fn(prompt: str) -> str callable suitable for
-    passing to QuestionGenerator.
-    """
-
-    def llm_fn(prompt: str) -> str:
-        return provider.complete(prompt, max_tokens=2056)
-
-    return llm_fn
+    try:
+        result = repair_loads(text)
+    except Exception:
+        logger.warning("Could not extract JSON from model output")
+        return {}
+    if isinstance(result, dict):
+        return result
+    logger.warning("Could not extract JSON from model output")
+    return {}
 
 
 def build_agent_fn(provider: ModelProvider):
     """
-    Returns an agent_fn compatible with run.py's _run_one signature:
+    Returns an agent_fn compatible with task_eval.py's signature:
         agent_fn(question, context, tools, max_steps, runtime=None)
         -> (AgentTrajectory, dict)
 
-    The tools argument from run.py is ignored here — the provider owns
-    its tool definitions internally. runtime is passed through to
-    provider.run_agent().
+    The tools argument is ignored — the provider owns its tool definitions internally.
     """
 
     def agent_fn(question, context, tools, max_steps, runtime=None):
         return provider.run_agent(
-            question=question,
+            task_id=question.question_id,
+            question_text=question.question_text,
             context=context,
             runtime=runtime,
             max_steps=max_steps,
+            expected_answer_schema=question.expected_answer_schema,
+            actor=getattr(question, "actor", None),
+            actor_role=getattr(question, "actor_role", None),
+            as_of_time=getattr(question, "as_of_time", None),
         )
 
     return agent_fn

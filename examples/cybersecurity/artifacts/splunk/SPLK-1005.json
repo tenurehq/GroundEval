@@ -1,9 +1,0 @@
-{
-  "id": "SPLK-1005",
-  "timestamp": "2026-03-10T10:00:00",
-  "subsystem": "splunk",
-  "type": "alert",
-  "alert_name": "Phishing Email Detected",
-  "severity": "medium",
-  "raw": "From: benefits@fake-portal-hr.com. To: hr-dept@company.com. Subject: Your 2026 Benefits Enrollment. URL: http://fake-portal-hr.com/login. Domain registered 2 hours ago. Phishing kit identified."
-}

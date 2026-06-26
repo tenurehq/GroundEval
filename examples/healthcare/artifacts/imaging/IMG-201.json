@@ -1,9 +1,0 @@
-{
-  "id": "IMG-201",
-  "timestamp": "2026-03-02T14:00:00",
-  "subsystem": "imaging",
-  "type": "ct_chest",
-  "patient": "Maria Gonzales",
-  "finding": "No pulmonary embolism. Moderate pericardial effusion (1.2 cm). Recommend cardiology consult.",
-  "flagged": "abnormal"
-}
