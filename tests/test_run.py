@@ -78,7 +78,10 @@ def test_validate_config_empty_contracts(caplog):
     """warns and raises when no task_contracts defined and no artifacts dir."""
     with caplog.at_level(logging.WARNING):
         with pytest.raises(FileNotFoundError, match="does not exist"):
-            _validate_config({"task_contracts": []})
+            _validate_config({
+                "task_contracts": [],
+                "artifacts_dir": "/nonexistent/path/xyz789",
+            })
     assert "No task_contracts defined" in caplog.text
 
 
