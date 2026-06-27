@@ -870,81 +870,79 @@ def test_generate_observe_report_truncates_long_return():
     assert "..." in text
 
 
-def test_write_draft_output_full():
-    with tempfile.TemporaryDirectory() as tmp:
-        run = ObservedRun(
-            run_id="r1",
-            framework="crewai",
-            agent_class="x",
-            tool_calls=[
-                ObservedToolCall(
-                    "fetch_customer",
-                    {"id": "1"},
-                    {"plan": "enterprise", "status": "active"},
-                    10.0,
-                ),
-            ],
-            final_answer={"preconditions_verified": [], "should_act": True},
-            total_latency_ms=100,
-        )
+def test_write_draft_output_full(isolate_filesystem):
+    tmp = str(isolate_filesystem)
+    run = ObservedRun(
+        run_id="r1",
+        framework="crewai",
+        agent_class="x",
+        tool_calls=[
+            ObservedToolCall(
+                "fetch_customer",
+                {"id": "1"},
+                {"plan": "enterprise", "status": "active"},
+                10.0,
+            ),
+        ],
+        final_answer={"preconditions_verified": [], "should_act": True},
+        total_latency_ms=100,
+    )
 
-        gen = DraftGenerator(run, mode="standard")
-        result_dir = write_draft_output(tmp, run, gen)
+    gen = DraftGenerator(run, mode="standard")
+    result_dir = write_draft_output(tmp, run, gen)
 
-        assert (result_dir / "observed_run.json").exists()
-        assert (result_dir / "observe_report.md").exists()
-        assert (result_dir / "draft_config" / "config.yaml").exists()
-        assert (result_dir / "draft_config" / "tool_map.yaml").exists()
-        artifacts_dir = result_dir / "draft_config" / "artifacts" / "observed"
-        artifact_files = list(artifacts_dir.glob("*.json"))
-        assert len(artifact_files) == 1
-        assert artifact_files[0].name.startswith("001_fetch_customer")
-        assert (result_dir / "draft_config" / "REVIEW.md").exists()
+    assert (result_dir / "observed_run.json").exists()
+    assert (result_dir / "observe_report.md").exists()
+    assert (result_dir / "draft_config" / "config.yaml").exists()
+    assert (result_dir / "draft_config" / "tool_map.yaml").exists()
+    artifacts_dir = result_dir / "draft_config" / "artifacts" / "observed"
+    artifact_files = list(artifacts_dir.glob("*.json"))
+    assert len(artifact_files) == 1
+    assert artifact_files[0].name.startswith("001_fetch_customer")
+    assert (result_dir / "draft_config" / "REVIEW.md").exists()
 
-        with open(result_dir / "draft_config" / "config.yaml") as f:
-            cfg = yaml.safe_load(f)
-        assert cfg["groundeval"]["config_status"] == "draft"
+    with open(result_dir / "draft_config" / "config.yaml") as f:
+        cfg = yaml.safe_load(f)
+    assert cfg["groundeval"]["config_status"] == "draft"
 
-        with open(result_dir / "observed_run.json") as f:
-            saved = json.load(f)
+    with open(result_dir / "observed_run.json") as f:
+        saved = json.load(f)
         assert saved["run_id"] == "r1"
 
 
-def test_write_draft_output_no_return_value_skips_artifacts():
-    with tempfile.TemporaryDirectory() as tmp:
-        run = ObservedRun(
-            run_id="r1",
-            framework="x",
-            agent_class="x",
-            tool_calls=[ObservedToolCall("search", {}, "just a string", 1.0)],
-            final_answer={},
-            total_latency_ms=0,
-        )
-        gen = DraftGenerator(run)
-        result_dir = write_draft_output(tmp, run, gen)
-        artifacts_dir = result_dir / "draft_config" / "artifacts" / "observed"
-        assert not list(artifacts_dir.glob("*.json"))
+def test_write_draft_output_no_return_value_skips_artifacts(isolate_filesystem):
+    tmp = str(isolate_filesystem)
+    run = ObservedRun(
+        run_id="r1",
+        framework="x",
+        agent_class="x",
+        tool_calls=[ObservedToolCall("search", {}, "just a string", 1.0)],
+        final_answer={},
+        total_latency_ms=0,
+    )
+    gen = DraftGenerator(run)
+    result_dir = write_draft_output(tmp, run, gen)
+    artifacts_dir = result_dir / "draft_config" / "artifacts" / "observed"
+    assert not list(artifacts_dir.glob("*.json"))
 
 
-def test_write_draft_output_creates_output_dir():
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "nested" / "output"
-        run = ObservedRun("r", "x", "x", [], {}, 0)
-        gen = DraftGenerator(run)
-        result = write_draft_output(out, run, gen)
-        assert result.exists()
+def test_write_draft_output_creates_output_dir(isolate_filesystem):
+    out = Path(isolate_filesystem) / "nested" / "output"
+    run = ObservedRun("r", "x", "x", [], {}, 0)
+    gen = DraftGenerator(run)
+    result = write_draft_output(out, run, gen)
+    assert result.exists()
 
 
-def test_write_draft_output_overwrites_existing():
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp)
-        (out / "observed_run.json").write_text("stale")
-        run = ObservedRun("r2", "crewai", "x", [], {}, 0)
-        gen = DraftGenerator(run)
-        write_draft_output(out, run, gen)
-        with open(out / "observed_run.json") as f:
-            data = json.load(f)
-        assert data["run_id"] == "r2"
+def test_write_draft_output_overwrites_existing(isolate_filesystem):
+    out = Path(isolate_filesystem)
+    (out / "observed_run.json").write_text("stale")
+    run = ObservedRun("r2", "crewai", "x", [], {}, 0)
+    gen = DraftGenerator(run)
+    write_draft_output(out, run, gen)
+    with open(out / "observed_run.json") as f:
+        data = json.load(f)
+    assert data["run_id"] == "r2"
 
 
 def test_draft_mode_keyword_preserved_in_config():
@@ -1027,7 +1025,7 @@ def test_empty_tool_calls_empty_draft():
     assert config["task_contracts"][0]["preconditions"] == []
 
 
-def test_non_serializable_return_value_in_artifact():
+def test_non_serializable_return_value_in_artifact(isolate_filesystem):
     run = ObservedRun(
         "r1",
         "x",
@@ -1040,11 +1038,10 @@ def test_non_serializable_return_value_in_artifact():
 
     run.tool_calls.append(ObservedToolCall("complex_math", {}, {"fn": math.sqrt}, 1.0))
 
-    with tempfile.TemporaryDirectory() as tmp:
-        gen = DraftGenerator(run)
-        result_dir = write_draft_output(tmp, run, gen)
-        artifacts_dir = result_dir / "draft_config" / "artifacts" / "observed"
-        assert len(list(artifacts_dir.glob("*.json"))) > 0
+    gen = DraftGenerator(run)
+    result_dir = write_draft_output(str(isolate_filesystem), run, gen)
+    artifacts_dir = result_dir / "draft_config" / "artifacts" / "observed"
+    assert len(list(artifacts_dir.glob("*.json"))) > 0
 
 
 def test_very_large_observed_run_serialization():
@@ -1065,7 +1062,7 @@ def test_very_large_observed_run_serialization():
     assert restored.tool_calls[99].tool_name == "tool_99"
 
 
-def test_unicode_in_tool_names_and_values():
+def test_unicode_in_tool_names_and_values(isolate_filesystem):
     run = ObservedRun(
         "r_unicode",
         "crewai",
@@ -1078,11 +1075,10 @@ def test_unicode_in_tool_names_and_values():
         {"décision": "approuvé"},
         0,
     )
-    with tempfile.TemporaryDirectory() as tmp:
-        gen = DraftGenerator(run)
-        write_draft_output(tmp, run, gen)
+    gen = DraftGenerator(run)
+    result_dir = write_draft_output(str(isolate_filesystem), run, gen)
 
-        config_path = Path(tmp) / "draft_config" / "config.yaml"
-        with open(config_path) as f:
-            loaded = yaml.safe_load(f)
-        assert "récupérer_client" in loaded["agent"]["tool_map"]
+    config_path = result_dir / "draft_config" / "config.yaml"
+    with open(config_path) as f:
+        loaded = yaml.safe_load(f)
+    assert "récupérer_client" in loaded["agent"]["tool_map"]
