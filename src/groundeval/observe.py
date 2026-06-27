@@ -273,14 +273,14 @@ def observe_agent(
 
 
 def observe_crew(
-    crew_class_path: str,
+    agent_class_path: str,
     tool_map: dict[str, str] | None = None,
     max_steps: int = 10,
 ) -> ObservedRun:
     """Deprecated: use observe_agent(framework='crewai', ...) instead."""
     return observe_agent(
         framework="crewai",
-        class_path=crew_class_path,
+        class_path=agent_class_path,
         tool_map=tool_map,
         max_steps=max_steps,
     )

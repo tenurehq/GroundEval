@@ -164,7 +164,7 @@ Add an `agent` block to `config.yaml`:
 ```yaml
 agent:
   framework: crewai
-  crew_class: my_project.crew.MyCrew
+  agent_class: my_project.crew.MyCrew
   tool_map:                         # optional
     fetch_customer: fetch
     search_tickets: search
@@ -174,7 +174,7 @@ agent:
 | Field         | Required | What it does                                                               |
 | ------------- | -------: | -------------------------------------------------------------------------- |
 | `framework`   |      Yes | Must be `"crewai"`.                                                        |
-| `crew_class`  |      Yes | Dotted Python path to your `@CrewBase` class or Crew factory.              |
+| `agent_class` |      Yes | Dotted Python path to your `@CrewBase` class or Crew factory.              |
 | `tool_map`    |       No | Maps your tool names to `"fetch"` or `"search"`. Auto-detected if omitted. |
 | `answer_key`  |       No | Extracts a nested key from your crew output.                               |
 | `output_mode` |       No | `"auto"` by default. Use `"pydantic"` or `"raw"` when needed.              |

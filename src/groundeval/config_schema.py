@@ -69,11 +69,11 @@ def _validate_agent_block(cfg: dict[str, Any]) -> None:
     framework = agent_cfg.get("framework", "")
 
     if framework == "crewai":
-        crew_class = agent_cfg.get("crew_class", "")
-        if not crew_class:
+        agent_class = agent_cfg.get("agent_class", "")
+        if not agent_class:
             raise ValueError(
-                "agent.crew_class is required when agent.framework is 'crewai'. "
-                "Set crew_class to the dotted Python path of your @CrewBase class."
+                "agent.agent_class is required when agent.framework is 'crewai'. "
+                "Set agent_class to the dotted Python path of your @CrewBase class."
             )
 
     output_mode = agent_cfg.get("output_mode", "")

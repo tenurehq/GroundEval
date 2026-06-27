@@ -139,8 +139,8 @@ def _infer_tool_verb(tool_name: str, tool_map: dict[str, str] | None = None) -> 
     return "fetch"
 
 
-def _load_crew(crew_class_path: str) -> Any:
-    module_path, attr_name = crew_class_path.rsplit(".", 1)
+def _load_crew(agent_class_path: str) -> Any:
+    module_path, attr_name = agent_class_path.rsplit(".", 1)
     module = importlib.import_module(module_path)
     crew_cls = getattr(module, attr_name)
 
@@ -348,7 +348,7 @@ def _build_crew_agent_fn(
 
 
 def build_crewai_agent_fn(
-    crew_class_path: str,
+    agent_class_path: str,
     tool_map: dict[str, str] | None = None,
     answer_key: str | None = None,
     output_mode: str = "auto",
@@ -364,7 +364,7 @@ def build_crewai_agent_fn(
 
         return factory
 
-    crew = _load_crew(crew_class_path)
+    crew = _load_crew(agent_class_path)
     return _build_crew_agent_fn(
         crew=crew,
         tool_map=tool_map,
