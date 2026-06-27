@@ -173,7 +173,7 @@ def test_task_contract_from_dict_defaults():
     assert tc.task_description == "minimal"
     assert tc.valid_action == "all_preconditions_pass"
     assert tc.decision_field == "should_act"
-    assert tc.artifacts_dir == "./task_artifacts"
+    assert tc.artifacts_dir == "./data"
     assert tc.actor is None
     assert tc.role is None
     assert tc.actors == {}

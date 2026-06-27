@@ -1,6 +1,6 @@
 # Evaluating CrewAI Crews with GroundEval
 
-GroundEval lets you deterministically evaluate existing CrewAI crews without rewriting your agent code. Your crew runs inside the harness as written. GroundEval wraps the tools, gates runtime access, records the trajectory, and scores each run across three failure modes: Counterfactual, Silence, and Perspective.
+GroundEval plugs into your existing CrewAI crew without touching your agent code. Point it at your crew, run it, and get back a score that tells you what your agent checked, what it skipped, what evidence it used, and whether it stayed inside its permissions.
 
 No LLM judge. Scores come from task contracts, declared fixtures or seeded artifacts, and access rules.
 
@@ -26,10 +26,20 @@ If you already have GroundEval installed:
 uv add crewai
 ```
 
-## 2. How the adapter works
+## 2. Observe an existing crew first
 
-The CrewAI adapter sits between your crew and the outside world. It always uses the same wrapping path regardless of evaluation mode.
+If you already have a CrewAI crew, start with Observe Mode. GroundEval runs the crew, records tool calls and outputs, then generates a draft evaluation package you can review.
 
+```bash
+uv run python -m groundeval observe \
+  --framework crewai \
+  --crew-class my_project.crew.MyCrew \
+  --output eval_output
+```
+
+## 3. How the adapter works
+
+GroundEval lets you observe and deterministically evaluate existing CrewAI crews without rewriting your agent code. In Observe Mode, your crew runs with recording hooks so GroundEval can draft an evaluation config. In evaluation mode, GroundEval wraps tools through the gated runtime, records the trajectory, and scores each run across Counterfactual, Silence, and Perspective.
 It:
 
 1. **Loads your crew class** by dotted path, such as `my_project.crew.MyCrew`.
@@ -59,19 +69,19 @@ Your crew code does not change. GroundEval patches at the tool boundary.
 
 ### Evaluation modes
 
-GroundEval supports two evaluation modes for CrewAI. The tool wrapping is identical in both — the difference is where data comes from.
+There are two ways to give GroundEval the data it scores against.
 
-**Corpus mode** (default, no `allowed_tools` declared):
-The `GatedRuntime` is backed by a file corpus in `./task_artifacts/`. When your agent calls a tool, the runtime fetches or searches real artifact JSON files. This mode evaluates evidence-path correctness, retrieval quality, and access-boundary adherence against a realistic artifact set.
+Using real artifact files (**Corpus mode**) -- the default:
+The `GatedRuntime` is backed by a file corpus in `./data/`. When your agent calls a tool, the runtime fetches or searches real artifact JSON files. This mode evaluates evidence-path correctness, retrieval quality, and access-boundary adherence against a realistic artifact set.
 
-**Fixture mode** (when `allowed_tools` are declared in the task contract):
+Using inline fixture data (**Fixture mode**) -- no artifact files needed
 The `GatedRuntime` is backed by a `FixtureBackend` that synthesizes data from the contract's `allowed_tools` declarations. When your agent calls a tool, the runtime returns deterministic data from the declared `returns` dict merged with schema-compatible defaults for any missing fields. This mode lets you evaluate whether your agent uses the required facts and respects permission boundaries without building a full artifact corpus.
 
 Fixture mode does not remove GroundEval's enforcement model. The runtime still records every call, checks subsystem access, enforces actor visibility, and applies temporal gates (when `timestamp` is declared on an `AllowedTool`). Perspective scoring works the same in both modes.
 
-## 3. Write a task contract
+## 4. Tell GroundEval what your agent is supposed to do
 
-A task contract declares what the agent must verify before acting.
+This is where you define the checks your agent should complete before taking action. GroundEval calls this a task contract -- a YAML block that lists the preconditions, the data sources, and what a passing run looks like.
 
 ```yaml
 # config.yaml
@@ -147,7 +157,7 @@ task_contracts:
 
 When `allowed_tools` are declared, no artifact files are needed. Each declared tool becomes a virtual artifact in the `FixtureBackend`. The `returns` dict provides the ground truth values. Fields not in `returns` are populated with schema-compatible defaults from the tool's return type annotations.
 
-## 4. Wire your crew
+## 5. Wire your crew
 
 Add an `agent` block to `config.yaml`:
 
@@ -169,9 +179,9 @@ agent:
 | `answer_key`  |       No | Extracts a nested key from your crew output.                               |
 | `output_mode` |       No | `"auto"` by default. Use `"pydantic"` or `"raw"` when needed.              |
 
-## 5. Output format
+## 6. Output format
 
-The adapter appends the expected output schema to your crew's last task automatically. You do not need to write this schema yourself.
+You don't need to write an output schema. GroundEval appends the expected format to your crew's last task automatically.
 
 The scorers consume three fields:
 
@@ -181,7 +191,7 @@ The scorers consume three fields:
 
 If your crew produces output that does not parse as JSON with those fields, the adapter wraps the raw text with empty preconditions. The run will not crash, but the score will be zero.
 
-## 6. Provide seed artifacts (corpus mode)
+## 7. Provide seed artifacts (corpus mode)
 
 When running in corpus mode (no `allowed_tools` declared), GroundEval needs ground-truth artifacts to validate the crew's answer.
 
@@ -208,11 +218,11 @@ When running in corpus mode (no `allowed_tools` declared), GroundEval needs grou
 ]
 ```
 
-Put these files in `./task_artifacts/`.
+Put these files in `./data/`.
 
 In fixture mode, skip this step. The ground truth comes from the `returns` dict in your `allowed_tools` declarations.
 
-## 7. Run the evaluation
+## 8. Run the evaluation
 
 ```bash
 uv run python -m groundeval task --config config.yaml
@@ -221,11 +231,13 @@ uv run python -m groundeval task --config config.yaml
 Example output:
 
 ```text
-Overall -- cf=0.833  sl=0.750  ps=1.000  overall=0.861  accuracy=0.500
-  verify_escalation_readiness: cf=0.833 sl=0.750 ps=1.000 overall=0.861
+Overall -- counterfactual=0.833  silence=0.750  perspective=1.000  overall=0.861  accuracy=0.500
+  verify_escalation_readiness: counterfactual=0.833  silence=0.750 perspective=1.000 overall=0.861
 ```
 
-## 8. Limitations
+counterfactual = evidence used correctly, silence = checks completed, perspective = permissions respected. overall is the mean of the three.
+
+## 9. Known constraints and edge cases
 
 * **GroundEval does not configure your crew's LLM.**
   The `provider` and `model` fields in `config.yaml` only control GroundEval's built-in agent loop. When `framework: crewai` is set, your crew uses its own configured LLM.
@@ -242,7 +254,7 @@ Overall -- cf=0.833  sl=0.750  ps=1.000  overall=0.861  accuracy=0.500
 * **`@CrewBase` classes work best.**
   Plain `Crew` instances also work, but they lose the caching behavior of `_load_crew()`.
 
-## 9. Full example layout
+## 10. Full example layout
 
 ```text
 my-eval/

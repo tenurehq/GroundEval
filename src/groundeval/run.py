@@ -1,20 +1,6 @@
-"""
-groundeval/run.py
-======================
-CLI entrypoint. One command:
-
-    python -m groundeval task --config config.yaml
-
-Runs task-contract evaluation. No event log required.
-One config format: task_contracts with actors and roles.
-One question type: task contract.
-Three scoring tracks applied to every run.
-"""
-
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
 import json
 import logging
 from datetime import datetime
@@ -22,13 +8,12 @@ from pathlib import Path
 import random as _random
 
 import yaml
+from dotenv import load_dotenv
 
 from .core import (
-    AgentTrajectory,
     TaskContract,
 )
 from .adapters import (
-    FileCorpusAdapter,
     YamlAccessPolicy,
 )
 from .task_eval import (
@@ -39,7 +24,6 @@ logger = logging.getLogger("groundeval")
 
 
 def _merge_with_defaults(main_cfg: dict) -> dict:
-    """Load evaluation defaults from config/evaluation.yaml and merge main_cfg on top."""
     defaults_path = Path("config/evaluation.yaml")
     if not defaults_path.exists():
         logger.warning(
@@ -72,7 +56,7 @@ def _validate_config(cfg: dict) -> None:
     any_fixture = any(tc.get("allowed_tools") for tc in task_contracts_raw)
 
     if not any_fixture:
-        artifacts_dir = cfg.get("artifacts_dir", "./task_artifacts")
+        artifacts_dir = cfg.get("artifacts_dir", "./data")
         art_path = Path(artifacts_dir)
         if not art_path.exists():
             raise FileNotFoundError(
@@ -103,13 +87,6 @@ def _validate_config(cfg: dict) -> None:
 
 
 def cmd_task(args) -> None:
-    """
-    Run task-contract evaluation.
-
-    Loads task_contracts from config, seeds artifacts as ground truth,
-    runs the agent against each task contract, and scores all three tracks.
-    No event log required.
-    """
     with open(args.config) as f:
         raw_cfg = yaml.safe_load(f)
         if not isinstance(raw_cfg, dict):
@@ -121,6 +98,18 @@ def cmd_task(args) -> None:
     from .config_schema import validate_config
 
     validate_config(cfg, command="task")
+
+    ge_cfg = cfg.get("groundeval", {})
+    if ge_cfg.get("generated_from_observation") and not ge_cfg.get("reviewed"):
+        if not getattr(args, "allow_draft_config", False):
+            logger.warning(
+                "This config was generated from observation and has not been marked reviewed."
+            )
+            logger.warning(
+                "Run: groundeval validate --config {config_path} --mark-reviewed"
+            )
+            logger.warning("Or continue explicitly with --allow-draft-config")
+
     _validate_config(cfg)
 
     seed = cfg.get("seed")
@@ -136,7 +125,7 @@ def cmd_task(args) -> None:
     logger.info(f"Loaded {len(contracts)} task contract(s)")
 
     artifacts_dir = cfg.get("artifacts_dir") or (
-        contracts[0].artifacts_dir if contracts else "./task_artifacts"
+        contracts[0].artifacts_dir if contracts else "./data"
     )
     logger.info(f"Artifacts directory: {artifacts_dir}")
 
@@ -187,9 +176,9 @@ def cmd_task(args) -> None:
     logger.info(f"Task results written to {out_path}")
     logger.info(
         f"Overall -- "
-        f"cf={summary['counterfactual_score']:.3f}  "
-        f"sl={summary['silence_score']:.3f}  "
-        f"ps={summary['perspective_score']:.3f}  "
+        f"counterfactual={summary['counterfactual_score']:.3f}  "
+        f"silence={summary['silence_score']:.3f}  "
+        f"perspective={summary['perspective_score']:.3f}  "
         f"overall={summary['overall_score']:.3f}  "
         f"accuracy={summary['accuracy']:.3f}"
     )
@@ -205,12 +194,93 @@ def cmd_task(args) -> None:
         )
 
 
+def cmd_observe(args) -> None:
+    from .observe import observe_agent, DraftGenerator, write_draft_output
+
+    output_dir = args.output or "./eval_output"
+
+    logger.info(f"Observing agent: {args.agent_class}")
+    logger.info(f"Framework: {args.framework}")
+
+    observed = observe_agent(
+        framework=args.framework,
+        class_path=args.agent_class,
+        tool_map=None,
+        max_steps=args.max_steps,
+    )
+
+    logger.info(
+        f"Observed run complete: {len(observed.tool_calls)} tool calls recorded"
+    )
+    logger.info(f"Run ID: {observed.run_id}")
+
+    if args.no_draft:
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+
+        observed_path = out / "observed_run.json"
+        with open(observed_path, "w") as f:
+            json.dump(observed.to_dict(), f, indent=2, default=str)
+        logger.info(f"Observed run written to {observed_path}")
+
+        report_lines = [
+            "# GroundEval Observation Report",
+            "",
+            f"Run ID: `{observed.run_id}`",
+            f"Framework: {observed.framework}",
+            f"Crew class: {observed.agent_class}",
+            f"Total latency: {observed.total_latency_ms:.0f}ms",
+            f"Tool calls recorded: {len(observed.tool_calls)}",
+            "",
+        ]
+        report_path = out / "observe_report.md"
+        with open(report_path, "w") as f:
+            f.write("\n".join(report_lines))
+        logger.info(f"Observation report written to {report_path}")
+        return
+
+    draft_mode = args.draft_mode or "standard"
+    generator = DraftGenerator(observed, mode=draft_mode)
+    write_draft_output(output_dir, observed, generator)
+
+    logger.info("")
+    logger.info("Next steps:")
+    logger.info(f"  1. Review: {output_dir}/draft_config/REVIEW.md")
+    logger.info(
+        f"  2. Validate: groundeval validate --config {output_dir}/draft_config/config.yaml"
+    )
+    logger.info(
+        f"  3. Evaluate: groundeval task --config {output_dir}/draft_config/config.yaml"
+    )
+
+
+def cmd_draft(args) -> None:
+    from .observe import ObservedRun, DraftGenerator, write_draft_output
+
+    run_path = Path(args.from_run)
+    if not run_path.exists():
+        raise FileNotFoundError(f"Observed run file not found: {run_path}")
+
+    with open(run_path) as f:
+        data = json.load(f)
+
+    observed = ObservedRun.from_dict(data)
+    output_dir = args.output or str(run_path.parent)
+
+    draft_mode = args.draft_mode or "standard"
+    generator = DraftGenerator(observed, mode=draft_mode)
+    write_draft_output(output_dir, observed, generator)
+
+    logger.info("")
+    logger.info(f"Review checklist: {output_dir}/draft_config/REVIEW.md")
+
+
 def _build_agent_fn(cfg: dict, contracts: list | None = None) -> Any:
     agent_cfg = cfg.get("agent", {})
 
     if agent_cfg.get("framework") == "crewai":
         try:
-            from .adapters.crewai_adapter import build_crewai_agent_fn
+            from .framework_adapters.crewai_adapter import build_crewai_agent_fn
         except ImportError:
             raise ImportError(
                 "CrewAI is required for the CrewAI adapter. "
@@ -220,7 +290,7 @@ def _build_agent_fn(cfg: dict, contracts: list | None = None) -> Any:
         contract = contracts[0] if contracts else None
 
         return build_crewai_agent_fn(
-            crew_class_path=agent_cfg["crew_class"],
+            crew_class_path=agent_cfg["agent_class"],
             tool_map=agent_cfg.get("tool_map"),
             answer_key=agent_cfg.get("answer_key"),
             output_mode=agent_cfg.get("output_mode", "auto"),
@@ -234,6 +304,7 @@ def _build_agent_fn(cfg: dict, contracts: list | None = None) -> Any:
 
 
 def main():
+    load_dotenv()
     log_dir = Path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -265,16 +336,68 @@ def main():
     )
     task_parser.add_argument("--model", default="claude-sonnet-4-6")
     task_parser.add_argument("--max-steps", type=int, default=10)
+    task_parser.add_argument(
+        "--allow-draft-config",
+        action="store_true",
+        help="Allow running evaluation with an unreviewed draft config",
+    )
+
+    observe_parser = sub.add_parser(
+        "observe", help="Observe an existing agent and generate draft eval config"
+    )
+    observe_parser.add_argument(
+        "--framework", required=True, help="Agent framework (e.g. crewai)"
+    )
+    observe_parser.add_argument(
+        "--agent-class",
+        required=True,
+        help="Dotted Python path to the agent class (e.g. module.MyCrew for CrewAI, module.MyAgent for AutoGen, etc.)",
+    )
+    observe_parser.add_argument(
+        "--no-draft", action="store_true", help="Skip draft config generation"
+    )
+    observe_parser.add_argument(
+        "--draft-mode",
+        choices=["conservative", "standard", "aggressive"],
+        default="standard",
+        help="How much inference to apply when generating draft config",
+    )
+    observe_parser.add_argument(
+        "--output", default="./eval_output", help="Output directory"
+    )
+    observe_parser.add_argument("--max-steps", type=int, default=10)
+
+    draft_parser = sub.add_parser(
+        "draft", help="Generate draft config from an existing observed run"
+    )
+    draft_parser.add_argument(
+        "--from-run", required=True, help="Path to observed_run.json"
+    )
+    draft_parser.add_argument(
+        "--draft-mode",
+        choices=["conservative", "standard", "aggressive"],
+        default="standard",
+    )
+    draft_parser.add_argument("--output", help="Output directory")
 
     val = sub.add_parser(
         "validate", help="Validate config + artifacts without running tasks"
     )
     val.add_argument("--config", required=True, help="Path to config.yaml")
+    val.add_argument(
+        "--mark-reviewed",
+        action="store_true",
+        help="Mark a draft config as reviewed",
+    )
 
     args = parser.parse_args()
 
     if args.command == "task":
         cmd_task(args)
+    elif args.command == "observe":
+        cmd_observe(args)
+    elif args.command == "draft":
+        cmd_draft(args)
     elif args.command == "validate":
         from .config_schema import validate_config
 
@@ -282,6 +405,23 @@ def main():
             raw_cfg = yaml.safe_load(f)
             if not isinstance(raw_cfg, dict):
                 raise ValueError(f"Expected YAML mapping, got {type(raw_cfg).__name__}")
+
+        if getattr(args, "mark_reviewed", False):
+            ge_cfg = raw_cfg.get("groundeval", {})
+            if ge_cfg.get("config_status") == "draft":
+                ge_cfg["config_status"] = "reviewed"
+                ge_cfg["reviewed"] = True
+                raw_cfg["groundeval"] = ge_cfg
+                with open(args.config, "w") as f:
+                    yaml.dump(
+                        raw_cfg,
+                        f,
+                        default_flow_style=False,
+                        sort_keys=False,
+                        allow_unicode=True,
+                    )
+                logger.info(f"Config marked as reviewed: {args.config}")
+
         validate_config(raw_cfg, command="validate")
         _validate_config(raw_cfg)
 
