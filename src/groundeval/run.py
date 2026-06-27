@@ -290,7 +290,7 @@ def _build_agent_fn(cfg: dict, contracts: list | None = None) -> Any:
         contract = contracts[0] if contracts else None
 
         return build_crewai_agent_fn(
-            crew_class_path=agent_cfg["agent_class"],
+            agent_class_path=agent_cfg["agent_class"],
             tool_map=agent_cfg.get("tool_map"),
             answer_key=agent_cfg.get("answer_key"),
             output_mode=agent_cfg.get("output_mode", "auto"),

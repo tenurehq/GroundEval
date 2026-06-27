@@ -121,7 +121,7 @@ def test_validate_config_accepts_output_keys():
 
 
 class TestAgentBlockValidation:
-    def test_crewai_without_crew_class_raises(self):
+    def test_crewai_without_agent_class_raises(self):
         cfg = {
             "task_contracts": [
                 {
@@ -131,10 +131,10 @@ class TestAgentBlockValidation:
             ],
             "agent": {"framework": "crewai"},
         }
-        with pytest.raises(ValueError, match="agent.crew_class is required"):
+        with pytest.raises(ValueError, match="agent.agent_class is required"):
             validate_config(cfg, command="task")
 
-    def test_crewai_with_crew_class_passes(self):
+    def test_crewai_with_agent_class_passes(self):
         cfg = {
             "task_contracts": [
                 {
@@ -142,7 +142,7 @@ class TestAgentBlockValidation:
                     "preconditions": [{"check": "pc1", "description": "d"}],
                 }
             ],
-            "agent": {"framework": "crewai", "crew_class": "my_project.crew.MyCrew"},
+            "agent": {"framework": "crewai", "agent_class": "my_project.crew.MyCrew"},
         }
         validate_config(cfg, command="task")
 

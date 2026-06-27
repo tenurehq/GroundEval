@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.02]
+
+### Changed
+
+- **`crew_class` renamed to `agent_class`**: Renamed the configuration field, function parameters, and internal variables from `crew_class` to `agent_class` across the entire codebase for consistency with the generalized agent interface. This affects:
+  - `docs/crewai.md`: Updated field name in config example and doc table 
+  - `config_schema.py`: Updated validation logic and error messages to reference `agent_class` instead of `crew_class` 
+  - `crewai_adapter.py`: Renamed parameters in `_load_crew`, `build_crewai_agent_fn`, and `observe_crew` functions 
+  - `run.py`: Updated keyword argument passed to `build_crewai_agent_fn` from `crew_class_path` to `agent_class_path` 
+  - `tests/test_config_schema.py`: Updated test function names and assertions to reflect the renamed field 
+
+---
+
 ## [0.01]
 
 ### Added
