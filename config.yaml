@@ -3,8 +3,6 @@ output_dir: ./eval_output
 actors:
   agent: sales_rep
 
-max_steps: 5
-
 roles:
   sales_rep:
     subsystems: [crm, email]

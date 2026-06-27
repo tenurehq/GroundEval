@@ -34,6 +34,7 @@ KNOWN_TOP_LEVEL_KEYS: set[str] = {
     "max_retries",
     "task_contracts",
     "seed",
+    "groundeval",
 }
 
 

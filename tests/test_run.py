@@ -17,9 +17,6 @@ from groundeval.run import (
 )
 
 
-# ── _merge_with_defaults ────────────────────────────────────
-
-
 def test_merge_with_defaults_overrides():
     """main config values override defaults."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -467,9 +464,6 @@ def test_cmd_task_multiple_contracts():
         assert data["summary"]["n_tasks"] == 2
 
 
-# ── main ────────────────────────────────────────────────────
-
-
 def test_main_task_command():
     """main with 'task' command dispatches to cmd_task."""
     with patch("sys.argv", ["groundeval", "task", "--config", "/fake/config.yaml"]):
@@ -495,3 +489,459 @@ def test_main_no_command_raises():
     with patch("sys.argv", ["groundeval"]):
         with pytest.raises(SystemExit):
             main()
+
+
+def test_cmd_observe_creates_output():
+    with tempfile.TemporaryDirectory() as tmp:
+        mock_crew = MagicMock()
+        mock_agent = MagicMock()
+        mock_tool = MagicMock()
+        mock_tool.name = "fetch_data"
+
+        def fake_run(**kwargs):
+            return {"result": "ok"}
+
+        mock_tool._run = fake_run
+        mock_agent.tools = [mock_tool]
+        mock_crew.agents = [mock_agent]
+
+        result_obj = MagicMock()
+        result_obj.raw = '{"should_act": true}'
+        mock_crew.kickoff.return_value = result_obj
+
+        with patch(
+            "groundeval.framework_adapters.crewai_adapter._load_crew",
+            return_value=mock_crew,
+        ):
+            args = argparse.Namespace(
+                command="observe",
+                framework="crewai",
+                agent_class="my.crew",
+                no_draft=False,
+                draft_mode="standard",
+                output=str(tmp),
+                max_steps=10,
+            )
+            from groundeval.run import cmd_observe
+
+            cmd_observe(args)
+
+        assert (Path(tmp) / "observed_run.json").exists()
+        assert (Path(tmp) / "observe_report.md").exists()
+        assert (Path(tmp) / "draft_config" / "config.yaml").exists()
+
+
+def test_cmd_observe_no_draft_flag():
+    with tempfile.TemporaryDirectory() as tmp:
+        mock_crew = MagicMock()
+        mock_agent = MagicMock()
+        mock_agent.tools = []
+        mock_crew.agents = [mock_agent]
+
+        result_obj = MagicMock()
+        result_obj.raw = "{}"
+        mock_crew.kickoff.return_value = result_obj
+
+        with patch(
+            "groundeval.framework_adapters.crewai_adapter._load_crew",
+            return_value=mock_crew,
+        ):
+            args = argparse.Namespace(
+                command="observe",
+                framework="crewai",
+                agent_class="my.crew",
+                no_draft=True,
+                draft_mode=None,
+                output=str(tmp),
+                max_steps=10,
+            )
+            from groundeval.run import cmd_observe
+
+            cmd_observe(args)
+
+        assert (Path(tmp) / "observed_run.json").exists()
+        assert (Path(tmp) / "observe_report.md").exists()
+        assert not (Path(tmp) / "draft_config").exists()
+
+
+def test_cmd_draft_from_saved_run():
+    with tempfile.TemporaryDirectory() as tmp:
+        run_data = {
+            "run_id": "saved_run_001",
+            "framework": "crewai",
+            "agent_class": "my.crew.Class",
+            "tool_calls": [
+                {
+                    "tool_name": "fetch_customer",
+                    "arguments": {"id": "1"},
+                    "return_value": {"plan": "enterprise"},
+                    "latency_ms": 10.0,
+                }
+            ],
+            "final_answer": {"should_act": True},
+            "total_latency_ms": 100.0,
+        }
+        run_path = Path(tmp) / "observed_run.json"
+        with open(run_path, "w") as f:
+            json.dump(run_data, f)
+
+        args = argparse.Namespace(
+            command="draft",
+            from_run=str(run_path),
+            draft_mode="standard",
+            output=str(tmp),
+        )
+
+        from groundeval.run import cmd_draft
+
+        cmd_draft(args)
+
+        assert (Path(tmp) / "draft_config" / "config.yaml").exists()
+        assert (Path(tmp) / "draft_config" / "REVIEW.md").exists()
+
+
+def test_cmd_draft_missing_file():
+    args = argparse.Namespace(
+        command="draft",
+        from_run="/nonexistent/path/observed_run.json",
+        draft_mode="standard",
+        output=None,
+    )
+    from groundeval.run import cmd_draft
+
+    with pytest.raises(FileNotFoundError, match="not found"):
+        cmd_draft(args)
+
+
+def test_cmd_draft_default_output_is_run_parent():
+    with tempfile.TemporaryDirectory() as tmp:
+        sub = Path(tmp) / "runs"
+        sub.mkdir()
+        run_data = {
+            "run_id": "r",
+            "framework": "crewai",
+            "agent_class": "x",
+            "tool_calls": [],
+            "final_answer": {},
+            "total_latency_ms": 0,
+        }
+        run_path = sub / "observed_run.json"
+        with open(run_path, "w") as f:
+            json.dump(run_data, f)
+
+        args = argparse.Namespace(
+            command="draft",
+            from_run=str(run_path),
+            draft_mode="conservative",
+            output=None,
+        )
+
+        from groundeval.run import cmd_draft
+
+        cmd_draft(args)
+
+        assert (sub / "draft_config" / "config.yaml").exists()
+
+
+def test_cmd_observe_aggressive_mode_flag():
+    with tempfile.TemporaryDirectory() as tmp:
+        mock_crew = MagicMock()
+        mock_agent = MagicMock()
+        mock_agent.tools = []
+        mock_crew.agents = [mock_agent]
+
+        result_obj = MagicMock()
+        result_obj.raw = "{}"
+        mock_crew.kickoff.return_value = result_obj
+
+        with patch(
+            "groundeval.framework_adapters.crewai_adapter._load_crew",
+            return_value=mock_crew,
+        ):
+            args = argparse.Namespace(
+                command="observe",
+                framework="crewai",
+                agent_class="my.crew",
+                no_draft=False,
+                draft_mode="aggressive",
+                output=str(tmp),
+                max_steps=5,
+            )
+            from groundeval.run import cmd_observe
+
+            cmd_observe(args)
+
+        with open(Path(tmp) / "draft_config" / "config.yaml") as f:
+            cfg = yaml.safe_load(f)
+        assert cfg["groundeval"]["draft_mode"] == "aggressive"
+
+
+def test_cmd_task_warns_on_draft_config(caplog):
+    with tempfile.TemporaryDirectory() as tmp:
+        config_path = Path(tmp) / "config.yaml"
+        artifacts_path = Path(tmp) / "task_artifacts"
+        artifacts_path.mkdir()
+        (artifacts_path / "a.json").write_text('{"id": "a", "subsystem": "crm"}')
+
+        config = {
+            "output_dir": str(tmp),
+            "artifacts_dir": str(artifacts_path),
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "actors": {"agent": "sales_rep"},
+            "roles": {"sales_rep": {"subsystems": ["crm"]}},
+            "groundeval": {
+                "config_status": "draft",
+                "generated_from_observation": True,
+                "reviewed": False,
+            },
+            "task_contracts": [
+                {
+                    "name": "t1",
+                    "task_description": "Do the thing.",
+                    "preconditions": [{"check": "pc1", "description": "A"}],
+                }
+            ],
+        }
+        config_path.write_text(yaml.dump(config))
+
+        defaults_path = Path(tmp) / "config" / "evaluation.yaml"
+        defaults_path.parent.mkdir(parents=True, exist_ok=True)
+        defaults_path.write_text(yaml.dump({"seed": 1}))
+
+        mock_t = MagicMock()
+        mock_t.horizon_violations = 0
+        mock_t.actor_gate_violations = 0
+        mock_t.subsystem_violations = 0
+        mock_t.dead_ends_hit = 0
+        mock_t.dead_ends_recovered = 0
+        mock_t.tool_calls = []
+        mock_t.prompt_tokens = 0
+        mock_t.completion_tokens = 0
+        mock_t.budget_exceeded = False
+        mock_t.task_id = "t1"
+        mock_a = {
+            "preconditions_verified": [
+                {
+                    "check": "pc1",
+                    "passed": True,
+                    "facts_found": {},
+                    "evidence_artifacts": [],
+                }
+            ],
+            "all_preconditions_pass": True,
+            "reasoning": "ok",
+        }
+
+        def fake_agent(*args, **kwargs):
+            return mock_t, mock_a
+
+        with patch("groundeval.run._build_agent_fn", return_value=fake_agent):
+            with patch("groundeval.run.Path", wraps=Path) as mock_path:
+                original = Path
+
+                def _pw(p):
+                    if str(p) == "config/evaluation.yaml":
+                        return original(defaults_path)
+                    return original(p)
+
+                mock_path.side_effect = _pw
+
+                with caplog.at_level(logging.WARNING):
+                    args = argparse.Namespace(
+                        config=str(config_path),
+                        model="claude-sonnet-4-6",
+                        max_steps=3,
+                        allow_draft_config=False,
+                    )
+                    cmd_task(args)
+
+        assert "not been marked reviewed" in caplog.text
+
+
+def test_cmd_task_allow_draft_config_suppresses_warning(caplog):
+    with tempfile.TemporaryDirectory() as tmp:
+        config_path = Path(tmp) / "config.yaml"
+        artifacts_path = Path(tmp) / "task_artifacts"
+        artifacts_path.mkdir()
+        (artifacts_path / "a.json").write_text('{"id": "a"}')
+
+        config = {
+            "output_dir": str(tmp),
+            "artifacts_dir": str(artifacts_path),
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "actors": {"agent": "x"},
+            "roles": {"x": {"subsystems": ["crm"]}},
+            "groundeval": {
+                "config_status": "draft",
+                "generated_from_observation": True,
+                "reviewed": False,
+            },
+            "task_contracts": [
+                {
+                    "name": "t",
+                    "task_description": "d",
+                    "preconditions": [{"check": "p", "description": "d"}],
+                }
+            ],
+        }
+        config_path.write_text(yaml.dump(config))
+
+        defaults_path = Path(tmp) / "config" / "evaluation.yaml"
+        defaults_path.parent.mkdir(parents=True, exist_ok=True)
+        defaults_path.write_text(yaml.dump({"seed": 1}))
+
+        mock_t = MagicMock()
+        mock_t.horizon_violations = 0
+        mock_t.actor_gate_violations = 0
+        mock_t.subsystem_violations = 0
+        mock_t.dead_ends_hit = 0
+        mock_t.dead_ends_recovered = 0
+        mock_t.tool_calls = []
+        mock_t.prompt_tokens = 0
+        mock_t.completion_tokens = 0
+        mock_t.budget_exceeded = False
+        mock_t.task_id = "t"
+        mock_a = {
+            "preconditions_verified": [
+                {
+                    "check": "p",
+                    "passed": True,
+                    "facts_found": {},
+                    "evidence_artifacts": [],
+                }
+            ],
+            "all_preconditions_pass": True,
+            "reasoning": "",
+        }
+
+        def fake_agent(*args, **kwargs):
+            return mock_t, mock_a
+
+        with patch("groundeval.run._build_agent_fn", return_value=fake_agent):
+            with patch("groundeval.run.Path", wraps=Path) as mock_path:
+                original = Path
+
+                def _pw(p):
+                    if str(p) == "config/evaluation.yaml":
+                        return original(defaults_path)
+                    return original(p)
+
+                mock_path.side_effect = _pw
+
+                with caplog.at_level(logging.WARNING):
+                    args = argparse.Namespace(
+                        config=str(config_path),
+                        model="claude-sonnet-4-6",
+                        max_steps=3,
+                        allow_draft_config=True,
+                    )
+                    cmd_task(args)
+
+        assert "not been marked reviewed" not in caplog.text
+
+
+def test_main_observe_command():
+    with tempfile.TemporaryDirectory() as tmp:
+        mock_crew = MagicMock()
+        mock_agent = MagicMock()
+        mock_agent.tools = []
+        mock_crew.agents = [mock_agent]
+
+        result_obj = MagicMock()
+        result_obj.raw = "{}"
+        mock_crew.kickoff.return_value = result_obj
+
+        config_path = Path(tmp) / "config.yaml"
+        config_path.write_text("task_contracts: []")
+
+        with patch(
+            "groundeval.framework_adapters.crewai_adapter._load_crew",
+            return_value=mock_crew,
+        ):
+            with patch(
+                "sys.argv",
+                [
+                    "groundeval",
+                    "observe",
+                    "--framework",
+                    "crewai",
+                    "--agent-class",
+                    "my.crew.Class",
+                    "--output",
+                    str(tmp),
+                    "--no-draft",
+                ],
+            ):
+                main()
+
+        assert (Path(tmp) / "observed_run.json").exists()
+
+
+def test_main_draft_command():
+    with tempfile.TemporaryDirectory() as tmp:
+        run_data = {
+            "run_id": "r",
+            "framework": "crewai",
+            "agent_class": "x",
+            "tool_calls": [],
+            "final_answer": {},
+            "total_latency_ms": 0,
+        }
+        run_path = Path(tmp) / "run.json"
+        with open(run_path, "w") as f:
+            json.dump(run_data, f)
+
+        with patch(
+            "sys.argv",
+            [
+                "groundeval",
+                "draft",
+                "--from-run",
+                str(run_path),
+                "--output",
+                str(tmp),
+            ],
+        ):
+            main()
+
+        assert (Path(tmp) / "draft_config" / "config.yaml").exists()
+
+
+def test_main_validate_mark_reviewed():
+    with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
+        config = {
+            "task_contracts": [],
+            "groundeval": {
+                "config_status": "draft",
+                "generated_from_observation": True,
+                "reviewed": False,
+            },
+        }
+        yaml.dump(config, f)
+        config_path = f.name
+
+    with tempfile.TemporaryDirectory() as tmp:
+        art_dir = Path(tmp) / "task_artifacts"
+        art_dir.mkdir()
+        (art_dir / "a.json").write_text("{}")
+
+        with patch(
+            "sys.argv",
+            [
+                "groundeval",
+                "validate",
+                "--config",
+                config_path,
+                "--mark-reviewed",
+            ],
+        ):
+            with patch("groundeval.run._validate_config"):
+                main()
+
+        with open(config_path) as f:
+            updated = yaml.safe_load(f)
+
+    assert updated["groundeval"]["config_status"] == "reviewed"
+    assert updated["groundeval"]["reviewed"] is True

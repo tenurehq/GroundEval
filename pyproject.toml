@@ -10,6 +10,7 @@ description = "Deterministic evaluation for agents that reason over state"
 requires-python = ">=3.13"
 dependencies = [
     "anthropic>=0.111.0",
+    "dotenv>=0.9.9",
     "faker>=40.23.0",
     "json-repair>=0.25.3",
     "jsonschema>=4.26.0",

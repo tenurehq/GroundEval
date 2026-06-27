@@ -683,8 +683,6 @@ class OpenAIProvider(ModelProvider):
                     )
                 raise
 
-            print(response)
-
             if response.usage:
                 prompt_tokens += response.usage.prompt_tokens
                 completion_tokens += response.usage.completion_tokens

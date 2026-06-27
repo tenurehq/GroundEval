@@ -136,7 +136,7 @@ class TaskContract:
     preconditions: list[TaskPrecondition]
     valid_action: str = "all_preconditions_pass"
     decision_field: str = "should_act"
-    artifacts_dir: str = "./task_artifacts"
+    artifacts_dir: str = "./data"
     actor: str | None = None
     role: str | None = None
     actors: dict[str, str] = field(default_factory=dict)
@@ -162,7 +162,7 @@ class TaskContract:
             preconditions=preconditions,
             valid_action=d.get("valid_action", "all_preconditions_pass"),
             decision_field=d.get("decision_field", "should_act"),
-            artifacts_dir=d.get("artifacts_dir", "./task_artifacts"),
+            artifacts_dir=d.get("artifacts_dir", "./data"),
             actor=d.get("actor"),
             role=d.get("role"),
             actors=dict(d.get("actors", {})),

@@ -631,6 +631,17 @@ wheels = [
 ]
 
 [[package]]
+name = "dotenv"
+version = "0.9.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dotenv" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/b7/545d2c10c1fc15e48653c91efde329a790f2eecfbbf2bd16003b5db2bab0/dotenv-0.9.9-py2.py3-none-any.whl", hash = "sha256:29cf74a087b31dafdb5a446b6d7e11cbce8ed2741540e2339c69fbef92c94ce9", size = 1892, upload-time = "2025-02-19T22:15:01.647Z" },
+]
+
+[[package]]
 name = "durationpy"
 version = "0.10"
 source = { registry = "https://pypi.org/simple" }
@@ -776,6 +787,7 @@ name = "groundeval"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
+    { name = "dotenv" },
     { name = "faker" },
     { name = "json-repair" },
     { name = "jsonschema" },
@@ -798,6 +810,7 @@ dev = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.111.0" },
     { name = "crewai", marker = "extra == 'crewai'", specifier = ">=1.14.7" },
+    { name = "dotenv", specifier = ">=0.9.9" },
     { name = "faker", specifier = ">=40.23.0" },
     { name = "json-repair", specifier = ">=0.25.3" },
     { name = "jsonschema", specifier = ">=4.26.0" },

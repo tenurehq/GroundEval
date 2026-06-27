@@ -372,3 +372,71 @@ def build_crewai_agent_fn(
         output_mode=output_mode,
         contract=contract,
     )
+
+
+class CrewAIObserver:
+    """AgentObserver implementation for CrewAI framework."""
+
+    def load_agent(self, class_path: str) -> Any:
+        return _load_crew(class_path)
+
+    def instrument_agent(
+        self,
+        agent: Any,
+        recording: Any,
+        tool_map: dict[str, str] | None,
+    ) -> Any:
+        import copy as _copy
+
+        crew_copy = _copy.deepcopy(agent)
+        for crew_agent in crew_copy.agents:
+            wrapped_tools = []
+            for tool in crew_agent.tools:
+                tool_name = getattr(tool, "name", str(tool))
+
+                try:
+                    tool_copy = _copy.deepcopy(tool)
+                except (TypeError, AttributeError):
+                    wrapped_tools.append(tool)
+                    continue
+
+                original_run = getattr(tool_copy, "_run", None)
+
+                def _make_gated(orig_run, t_name):
+                    def gated_run(**kwargs):
+                        import time as _time
+
+                        t0 = _time.time()
+                        if orig_run is not None:
+                            result = orig_run(**kwargs)
+                        else:
+                            result = {}
+                        latency = (_time.time() - t0) * 1000
+                        recording.record(
+                            tool_name=t_name,
+                            arguments=kwargs,
+                            return_value=result,
+                            latency_ms=latency,
+                        )
+                        return result
+
+                    return gated_run
+
+                try:
+                    tool_copy._run = _make_gated(original_run, tool_name)
+                except AttributeError:
+                    pass
+
+                wrapped_tools.append(tool_copy)
+            crew_agent.tools = wrapped_tools
+        return crew_copy
+
+    def execute_agent(self, agent: Any) -> Any:
+        return agent.kickoff()
+
+    def set_max_steps(self, agent: Any, max_steps: int) -> None:
+        if hasattr(agent, "max_iter"):
+            try:
+                agent.max_iter = max_steps
+            except Exception:
+                pass
