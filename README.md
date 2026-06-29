@@ -2,6 +2,18 @@
 
 **A debugging loop for AI agents. See what your agent checked, what it skipped, what evidence it used, and whether each action stayed inside the right permissions.**
 
+## Framework support
+
+| Framework | Observe Mode | Deterministic Scoring | Gated Enforcement | Integration Guide |
+|---|:---:|:---:|:---:|:---:|
+| CrewAI | ✅ | ✅ | ✅ | [docs/crewai.md](docs/crewai.md) |
+| LangGraph | ⏳ | ⏳ | ⏳ | Planned |
+| Microsoft Agent Framework | ⏳ | ⏳ | ⏳ | Planned |
+| LlamaIndex | ⏳ | ⏳ | ⏳ | Planned |
+| Pydantic AI | ⏳ | ⏳ | ⏳ | Planned |
+
+> Adapters for additional frameworks are in development. Open an issue or see [CONTRIBUTING.md](CONTRIBUTING.md) if you want to add one.
+
 
 ## The problem with LLM judges
 
