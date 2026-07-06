@@ -81,6 +81,17 @@ class FileCorpusAdapter:
                                 )
                             self._index[aid] = (p, i)
             elif isinstance(doc, dict):
+                aid = doc.get("id", doc.get("_id", ""))
+                if aid:
+                    if aid in self._index:
+                        import warnings
+
+                        warnings.warn(
+                            f"FileCorpusAdapter: duplicate artifact ID "
+                            f"'{aid}' found in {p}. Previous entry will be overwritten.",
+                            stacklevel=2,
+                        )
+                    self._index[str(aid)] = p
                 self._index[p.stem] = p
             else:
                 self._index[p.stem] = p
