@@ -7,7 +7,7 @@
 | Framework | Observe Mode | Deterministic Scoring | Integration Guide |
 |---|:---:|:---:|:---:|
 | CrewAI | ✅ | ✅ | [docs/crewai.md](docs/crewai.md) |
-| LangGraph | ✅ | ✅ | [docs/maf.md](docs/langgraph.md) |
+| LangGraph | ✅ | ✅ | [docs/langgraph.md](docs/langgraph.md) |
 | Microsoft Agent Framework | ✅ | ✅ | [docs/maf.md](docs/maf.md) |
 | LlamaIndex | ⏳ | ⏳ | Planned |
 | Pydantic AI | ⏳ | ⏳ | Planned |
