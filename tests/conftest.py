@@ -6,23 +6,6 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def isolate_filesystem(tmp_path, monkeypatch):
-    """
-    Force every test to operate inside a fresh temporary directory.
-
-    - Changes the working directory to `tmp_path` for the duration of the test,
-      so relative paths resolve inside the sandbox automatically.
-    - Patches `builtins.open` to raise PermissionError if a test tries to open
-      an absolute path outside the sandbox in any write/create/append mode.
-    - pytest handles tmp_path creation and cleanup automatically; no manual
-      tempfile.mkdtemp or shutil.rmtree needed.
-
-    Yields the sandbox directory as a pathlib.Path so fixtures/tests that
-    explicitly need the path can request it:
-
-        def test_something(isolate_filesystem):
-            p = isolate_filesystem / "data.txt"
-            p.write_text("hello")
-    """
     monkeypatch.chdir(tmp_path)
 
     real_open = open

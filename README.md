@@ -1,49 +1,48 @@
 # GroundEval
 
-**A debugging loop for AI agents. See what your agent checked, what it skipped, what evidence it used, and whether each action stayed inside the right permissions.**
+**A debugging loop for AI agents. See what your agent checked, what it skipped, what evidence it actually used, and whether every action stayed inside the permissions it was supposed to have.**
 
 ## Framework support
 
-| Framework | Observe Mode | Deterministic Scoring | Gated Enforcement | Integration Guide |
-|---|:---:|:---:|:---:|:---:|
-| CrewAI | ✅ | ✅ | ✅ | [docs/crewai.md](docs/crewai.md) |
-| LangGraph | ⏳ | ⏳ | ⏳ | Planned |
-| Microsoft Agent Framework | ⏳ | ⏳ | ⏳ | Planned |
-| LlamaIndex | ⏳ | ⏳ | ⏳ | Planned |
-| Pydantic AI | ⏳ | ⏳ | ⏳ | Planned |
+| Framework | Observe Mode | Deterministic Scoring | Integration Guide |
+|---|:---:|:---:|:---:|
+| CrewAI | ✅ | ✅ | [docs/crewai.md](docs/crewai.md) |
+| LangGraph | ✅ | ✅ | [docs/maf.md](docs/langgraph.md) |
+| Microsoft Agent Framework | ✅ | ✅ | [docs/maf.md](docs/maf.md) |
+| LlamaIndex | ⏳ | ⏳ | Planned |
+| Pydantic AI | ⏳ | ⏳ | Planned |
 
-> Adapters for additional frameworks are in development. Open an issue or see [CONTRIBUTING.md](CONTRIBUTING.md) if you want to add one.
+> More adapters are on the way. If there's a framework you need, open an issue or check [CONTRIBUTING.md](CONTRIBUTING.md), we'd love the help.
 
+## Why LLM judges aren't enough on their own
 
-## The problem with LLM judges
+An LLM judge can tell you whether an answer looks right. What it can't tell you is whether your agent:
 
-An LLM judge tells you if the answer looks right. It cannot tell you if the agent:
+- cited a document it should never have had access to in the first place
+- pulled in information from after the question's cutoff time
+- skipped a precondition it was supposed to verify before calling something safe
+- claimed evidence exists that simply isn't in the artifacts
 
-- cited a document it should not have had access to
-- used information from after the question's cutoff time
-- skipped verifying a precondition before declaring it safe to act
-- claimed to find evidence that does not exist in the artifacts
-
-GroundEval answers these questions deterministically. The ground truth comes from state, artifacts, access rules, and tool traces. Not from another model's judgment.
+GroundEval is built to answer exactly these questions, and it does it deterministically. The ground truth here comes from actual state, artifacts, access rules, and tool traces, not from another model guessing at what looks plausible.
 
 ## What GroundEval actually checks
 
-GroundEval scores every task run through three tracks simultaneously. Each track tests a different failure mode against the same trajectory and answer.
+Every task run gets scored across three tracks at once, each one probing a different way an agent can quietly go wrong, even while looking correct on the surface.
 
-**Counterfactual: Did the evidence actually support the decision?** If your agent said it was safe to act because all checks passed, GroundEval verifies whether the evidence it cited actually supports that conclusion or whether it just happened to be nearby.
+**Counterfactual: Did the evidence actually support the decision?** If your agent says it's safe to act because "all checks passed," GroundEval goes back and checks whether the cited evidence really backs that up, or whether it just happened to be sitting nearby.
 
-**Silence: Did the agent skip anything it was supposed to check??** A correct final answer is not enough if the agent never verified a required condition before acting. This catches agents that get lucky, not agents that are reliable.
+**Silence: Did the agent skip something it was supposed to check?** Getting the right answer isn't enough if the agent never verified a required condition along the way. This is what separates an agent that got lucky from one you can actually trust.
 
-**Perspective: Did the agent stay in its lane?** If a role only has access to CRM, email, and outreach logs, and the agent touched the audit trail, that is a violation, even if the answer was correct.
+**Perspective: Did the agent stay in its lane?** If a role is only supposed to touch CRM, email, and outreach logs, and the agent reaches into the audit trail anyway, that's a violation. Doesn't matter if the final answer was still correct.
 
 ## How it works
 
-1. **Observe an agent.** Record the tools it called, the evidence it returned, and the final answer it produced.
-2. **Generate a draft config.** GroundEval drafts a task contract, tool map, fixture artifacts, and review checklist from the observed run.
-3. **Review the draft.** Confirm the required preconditions, allowed tools, ground truth fields, roles, and decision field.
-4. **Run the evaluation.** GroundEval reruns the agent through a gated runtime and scores the trajectory across evidence use, skipped checks, and access boundaries.
+1. **Observe an agent.** GroundEval records the tools it called, the evidence it pulled back, and the answer it landed on.
+2. **Generate a draft config.** From that observed run, GroundEval drafts a task contract, an observed tool summary, and a review checklist.
+3. **Review the draft.** You confirm the required preconditions, tool expectations or allowed tools, ground truth fields, roles, and the decision field. This step matters, don't skip it.
+4. **Run the evaluation.** For framework-backed runs, GroundEval observes a fresh run and scores it against your reviewed contract. In task mode, it runs the configured agent loop directly against the task contracts.
 
-A correct answer through an invalid trajectory is a failure. GroundEval penalizes agents that reach the right conclusion through the wrong evidence, skipped verification, or out-of-bounds access.
+Here's the core idea worth internalizing: a correct answer reached through an invalid trajectory still counts as a failure. GroundEval penalizes agents that arrive at the right conclusion by the wrong path, whether that's using the wrong evidence, skipping verification, or wandering outside where they're allowed to look.
 
 ## What gets scored
 
@@ -51,24 +50,24 @@ Each task run produces four scores:
 
 | Score | What it measures |
 |---|---|
-| `counterfactual_score` | Did cited evidence support the agent's conclusions? |
-| `silence_score` | Did the agent verify all preconditions before deciding? |
-| `perspective_score` | Did the agent stay within permission boundaries? |
-| `overall_score` | Mean of the three track scores |
+| `counterfactual_score` | Did the cited evidence actually support the agent's conclusions? |
+| `silence_score` | Did the agent verify every precondition before deciding? |
+| `perspective_score` | Did the agent stay within its permission boundaries? |
+| `overall_score` | The mean of the three track scores |
 
-Each track reports an answer verdict and trajectory diagnostics. GroundEval ships with default scoring profiles. Advanced users can override track weights and penalties.
+Each track also comes back with an answer verdict and trajectory diagnostics. GroundEval ships with sensible default scoring profiles, but if you need more control, you can override track weights and penalties.
 
-Every evaluated task also includes a structured diagnostic trace. The trace records the agent run as data: tool calls, tool results, submitted answers, and errors. Diagnostics are not used to award credit. The scorer still relies on the deterministic trajectory. The diagnostic trace exists so you can debug why the score happened without reconstructing it from interleaved logs.
+Every task also produces a structured diagnostic trace, essentially the agent run recorded as data: tool calls, tool results, submitted answers, errors, all of it. That trace isn't used to award credit; scoring still comes from the deterministic trajectory alone. It's there so you can actually understand why a score happened without having to piece it back together from a jumble of interleaved logs.
 
 ## Quick start: observe an existing agent
 
-Observe Mode is the fastest path from an existing agent to a deterministic evaluation.
+Observe Mode is the fastest way to get from an agent you already have to a deterministic evaluation.
 
 ```bash
 uv sync --group dev --group crewai
 uv run python -m groundeval observe \
   --framework crewai \
-  --crew-class your_package.your_module.YourCrew \
+  --agent-class your_package.your_module.YourCrew \
   --output eval_output
 ```
 
@@ -78,15 +77,16 @@ GroundEval writes:
 eval_output/
   observed_run.json
   observe_report.md
+  observe_diagram.pdf
   draft_config/
     config.yaml
-    tool_map.yaml
+    observed_tools.yaml
     REVIEW.md
     task_contracts/
-    artifacts/
+      inferred_task.yaml
 ```
 
-Observation is not evaluation. The draft config is marked as unreviewed because observed behavior may not be correct behavior. Review the inferred preconditions, allowed tools, fixture returns, roles, and decision field before scoring.
+One thing worth being clear on: observation is not the same as evaluation. The draft config comes back marked unreviewed on purpose, because how the agent actually behaved isn't necessarily how it should behave. Take the time to review the inferred preconditions, tool expectations, roles, and decision field before you score anything against it.
 
 Validate the draft:
 
@@ -94,7 +94,7 @@ Validate the draft:
 uv run python -m groundeval validate --config eval_output/draft_config/config.yaml
 ```
 
-After review, mark it reviewed:
+Once you've reviewed it, mark it reviewed:
 
 ```bash
 uv run python -m groundeval validate \
@@ -102,21 +102,113 @@ uv run python -m groundeval validate \
   --mark-reviewed
 ```
 
-Then run the evaluation:
+Then score a fresh observed run against that reviewed config:
 
 ```bash
-uv run python -m groundeval task --config eval_output/draft_config/config.yaml
+uv run python -m groundeval observe \
+  --framework crewai \
+  --agent-class your_package.your_module.YourCrew \
+  --config eval_output/draft_config/config.yaml \
+  --score \
+  --output eval_output/scored_run
 ```
+
+### Observe artifacts
+
+Observe mode writes the standard observation artifacts below:
+
+```text
+eval_output/
+  observed_run.json
+  observe_report.md
+  observe_diagram.pdf
+```
+
+When draft generation is enabled, GroundEval also writes:
+
+```text
+eval_output/
+  draft_config/
+    config.yaml
+    observed_tools.yaml
+    REVIEW.md
+    task_contracts/
+      inferred_task.yaml
+```
+
+When there is framework-rich observation data available, GroundEval also writes framework-specific artifacts.
+
+CrewAI can also write:
+
+```text
+eval_output/
+  observed_run_crewai.json
+```
+
+MAF can also write:
+
+```text
+eval_output/
+  observed_run_maf.json
+  observe_report_maf.md
+```
+
+LangGraph can also write:
+
+```text
+eval_output/
+  observed_run_langgraph.json
+  observe_report_langgraph.md
+```
+
+With scoring, GroundEval writes observation outputs plus scored results into whatever directory you pass to `--output`. For example:
+
+```text
+eval_output/scored_run/
+  observed_run_<timestamp>.json
+  observe_report_<timestamp>.md
+  observe_diagram_<timestamp>.pdf
+  observed_scores_<timestamp>.json
+```
+
+### Artifact filename behavior
+
+Artifact filenames are intentionally not identical in every observe flow.
+
+- `groundeval observe` with draft generation writes stable filenames like `observed_run.json`, `observe_report.md`, and `observe_diagram.pdf`.
+- `groundeval observe --no-draft` writes timestamped filenames so multiple runs can coexist and be compared later.
+- `groundeval observe --score` also writes timestamped filenames so you can keep multiple scored observation runs side by side and use `compare` on them.
 
 ### Draft modes
 
-Use `--draft-mode conservative`, `standard`, or `aggressive` to control how much GroundEval infers from the observed run. All inferred checks still require review before scoring.
+Use `--draft-mode conservative`, `standard`, or `aggressive` to control how much GroundEval is willing to infer from the observed run. No matter which mode you pick, every inferred check still needs your review before it's used for scoring.
+
+## Comparing GroundEval outputs
+
+There's also a JSON comparison workflow built in, useful for reviewing what changed between two runs, two observed score outputs, or two task result files.
+
+See `compare.md` for the compare command itself, the file shapes it supports, and what the report looks like.
+
+## The observe diagram
+
+`observe_diagram.pdf` renders the observed run purely in terms of behavior, nothing else.
+
+It's meant to give you a fast scan of:
+
+- tool calls in the order they happened
+- compact summaries of arguments and return values
+- evidence tags, when normalized framework evidence is available
+- agent swimlanes, if multiple agents or sub-agents were observed
+- handoff arrows, but only when normalized handoff records actually exist
+- the final answer
+
+Right now the renderer only goes top to bottom. It uses a single global execution timeline across every lane, so vertical position reflects the overall run order rather than each lane progressing independently.
 
 ## Quick start: run the bundled demo
 
-GroundEval ships with a complete demo so you can see the CLI, agent trajectory, deterministic scoring, and generated report without writing your own config or artifacts first.
+GroundEval ships with a full demo, so you can see the CLI, an agent trajectory, deterministic scoring, and a generated report without writing your own config or artifacts first.
 
-Before running the demo, configure a model provider.
+Before running it, set up a model provider.
 
 For Anthropic:
 
@@ -130,7 +222,7 @@ For OpenAI:
 export OPENAI_API_KEY=your_key_here
 ```
 
-If you are using an OpenAI-compatible endpoint, also set:
+If you're using an OpenAI-compatible endpoint, also set:
 
 ```bash
 export OPENAI_BASE_URL=your_url_here
@@ -143,31 +235,31 @@ uv sync --group dev
 uv run python -m groundeval task --config config.yaml
 ```
 
-By default, the bundled demo uses the provider and model declared in `config.yaml`.
+By default, the demo uses whatever provider and model are declared in `config.yaml`.
 
-To override the model from the CLI:
+To override the model from the command line:
 
 ```bash
 uv run python -m groundeval task --config config.yaml --model gpt-4o
 ```
 
-The demo runs a sales-outreach verification task. The agent searches the bundled evidence corpus, retrieves artifacts, submits a structured answer, and GroundEval scores the run across Counterfactual, Silence, and Perspective.
+The demo itself runs a sales-outreach verification task. The agent searches the bundled evidence corpus, retrieves artifacts, submits a structured answer, and GroundEval scores the whole run across Counterfactual, Silence, and Perspective.
 
-Results are written to:
+Results land in:
 
 ```bash
 eval_output/
 ```
 
-You should see terminal output similar to:
+You should see terminal output that looks something like this:
 
 ```text
 Task results written to eval_output/task_results_<model>.json
-Overall -- counterfactual=0.833  silence=0.750  perspective=1.000  overall=0.861  accuracy=1.000
+Overall - counterfactual=0.833  silence=0.750  perspective=1.000  overall=0.861  accuracy=1.000
 Total violations: 0
 ```
 
-The JSON report includes per-task scores, precondition-level results, violation counts, tool trajectory, submitted answer, and diagnostic details.
+The JSON report gives you per-task scores, precondition-level results, violation counts, the full tool trajectory, the submitted answer, and the diagnostic details behind all of it.
 
 ### Validate the demo config without running the agent
 
@@ -175,11 +267,11 @@ The JSON report includes per-task scores, precondition-level results, violation 
 uv run python -m groundeval validate --config config.yaml
 ```
 
-This checks that the config is well-formed, artifacts are present, and task contracts are valid before spending API credits.
+This checks that the config is well-formed, that any required artifacts are actually present, and that the task contracts are valid, all before you spend a single API credit.
 
 ## What the demo includes
 
-The bundled demo includes everything needed for a first run:
+Everything you need for a first run is already bundled in:
 
 - a sample task contract
 - seed artifacts
@@ -188,41 +280,40 @@ The bundled demo includes everything needed for a first run:
 - a built-in agent loop
 - deterministic scoring across all three tracks
 
-The demo is intentionally small. It exists to show how the CLI works, what a trajectory looks like, and what kind of report GroundEval generates.
-
-You do not need to copy the demo structure exactly for your own evaluations.
+The demo is small on purpose. It's there to show you how the CLI behaves, what a trajectory actually looks like, and what kind of report comes out the other end. You don't need to mirror its structure exactly when you build your own evaluations.
 
 ## Configuring your own evaluation
 
-Use Observe Mode to draft the first config, then move deeper configuration into `docs/`.
+Use Observe Mode to draft your first config, then move into `docs/` for deeper configuration as you need it.
 
-Start here:
+Good places to start:
 
 - [`docs/crewai.md`](docs/crewai.md) for CrewAI integration
-- `docs/` for task contracts, artifacts, access policy, providers, and custom runners
+- [`docs/maf.md`](docs/maf.md) for Microsoft Agent Framework integration
+- `docs/` more broadly, for task contracts, artifacts, access policy, providers, and custom runners
 
-At a high level, a real evaluation defines:
+At a high level, a real evaluation needs to define:
 
-- what task the agent is trying to complete
-- what preconditions must be verified before acting
-- what evidence the agent is allowed to access
+- what task the agent is actually trying to complete
+- what preconditions have to be verified before it acts
+- what evidence it's allowed to access
 - where ground truth comes from
-- how the agent runner is invoked
-- what structured answer the scorer should expect
+- how the agent runner gets invoked
+- what structured answer the scorer should expect back
 
-GroundEval does not require your artifacts to look like the demo artifacts. They can represent tickets, claims, alerts, contracts, medical orders, Slack messages, audit records, database rows, GitHub issues, notes, game state, home-lab logs, or any other state your agent reasons over.
+Your artifacts don't need to look anything like the demo's. They can represent tickets, claims, alerts, contracts, medical orders, Slack messages, audit records, database rows, GitHub issues, notes, game state, home-lab logs, or really any other state your agent has to reason over.
 
 ## Bringing your own agent
 
-GroundEval includes a built-in Anthropic/OpenAI agent loop so the demo can run immediately.
+GroundEval comes with a built-in Anthropic/OpenAI agent loop so the demo can run out of the box.
 
-For production-style evaluation, use Observe Mode or wire GroundEval to your own runner. The scoring pipeline stays the same: GroundEval records the trajectory, validates access and evidence, and scores the result deterministically.
+For anything closer to production, use Observe Mode or wire GroundEval up to your own runner. Either way, the scoring pipeline underneath stays the same: GroundEval records the trajectory, checks access and evidence, and scores the result deterministically.
 
-See the integration guides in `docs/` for framework-specific setup.
+The integration guides in `docs/` walk through framework-specific setup.
 
 ## Supported agent frameworks
 
-GroundEval's observer interface is designed for framework adapters. Each adapter loads the agent, instruments its tools, records the observed run, and hands the result to the same draft and scoring pipeline.
+GroundEval's observer interface is built around framework adapters. Each adapter loads the agent, records the observed run, and hands the result off to the same draft and scoring pipeline everything else uses.
 
 ### CrewAI
 
@@ -232,31 +323,44 @@ uv sync --group dev --group crewai
 
 [See the CrewAI integration guide →](docs/crewai.md)
 
+### LangGraph
+
+LangGraph observation and deterministic scoring are implemented in code. Framework-specific artifact details should live in the framework docs.
+
+### Microsoft Agent Framework
+
+```bash
+uv sync --group dev --group maf
+```
+
+MAF observe mode runs the agent as it normally would, captures native OpenTelemetry spans in-process, normalizes what it observed, and supports both observing and scoring against a reviewed contract.
+
+[See the MAF integration guide →](docs/maf.md)
+
 ## Extension points
 
-The framework is designed so you can swap parts without rebuilding the engine.
+GroundEval is built so you can swap out individual parts without having to rebuild the whole engine.
 
-| What you might replace | When you would do it |
+| What you might replace | When you'd do it |
 |---|---|
 | Artifacts | You already know your domain's preconditions and want to evaluate against your own state |
-| `CorpusAdapter` | Your artifacts live in MongoDB, Elasticsearch, Postgres, S3, or a proprietary backend |
-| `AccessPolicy` | Your visibility rules are tenant-scoped, project-scoped, account-scoped, or time-scoped |
-| Agent runner | You are using a specific model provider or agent framework |
-| Task contracts | Your domain has different precondition verification requirements |
-
+| `CorpusAdapter` | Your artifacts live in MongoDB, Elasticsearch, Postgres, S3, or some proprietary backend |
+| `AccessPolicy` | Your visibility rules are scoped by tenant, project, account, or time |
+| Agent runner | You're using a specific model provider or agent framework |
+| Task contracts | Your domain has its own precondition verification requirements |
 
 ## What this is not
 
-GroundEval is not for grading whether your agent sounds good. If you want to evaluate tone, style, or conversational quality, use an LLM judge for that. GroundEval is for the parts where there is a right answer: did it check the right things, use the right evidence, and stay within its permissions.
+GroundEval isn't built for grading whether your agent sounds good. If you care about tone, style, or how natural a conversation feels, an LLM judge is the right tool for that job. GroundEval is for the parts where there's an actual right answer: did the agent check the right things, use the right evidence, and stay inside the permissions it was given.
 
 ## Preprint implementation
 
-The implementation used for the initial GroundEval preprint is preserved at:
+The implementation behind the initial GroundEval preprint is preserved at:
 
 - Branch: `paper/preprint-2026`
 - Tag: `groundeval-preprint-v1`
 
-The `main` branch contains the simplified public version intended for easier adoption.
+The `main` branch holds the simplified public version, meant to be easier to adopt.
 
 ## Citation
 

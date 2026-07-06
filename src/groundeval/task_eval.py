@@ -1,32 +1,16 @@
-"""
-groundeval/task_eval.py
-========================
-Task-contract evaluation path.
-
-The simpler alternative to event-log-based evaluation:
-  1. Define a task contract with preconditions
-  2. Seed artifacts as ground truth
-  3. Run the agent against the contract
-  4. Score through all three tracks (Counterfactual, Silence, Perspective)
-"""
-
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
-from pathlib import Path
 
 from .core import (
-    AgentTrajectory,
     GatedRuntime,
     TaskContract,
     ANSWER_SCHEMA_TASK,
 )
 from .core import AccessPolicy, CorpusAdapter
-from .adapters import FileCorpusAdapter, NullCorpusAdapter, YamlAccessPolicy
-from .scorers import score_task_run, aggregate_task_results, TaskEvalResult
-
+from .adapters import FileCorpusAdapter, YamlAccessPolicy
+from .scorers import score_task_run, TaskEvalResult
 
 logger = logging.getLogger("groundeval.task_eval")
 
@@ -188,8 +172,6 @@ def run_all_tasks(
     policy: AccessPolicy | None = None,
     max_steps: int = 10,
 ) -> list[TaskEvalResult]:
-    fixture_only = all(c.is_fixture_mode for c in contracts)
-
     fixture_only = all(c.is_fixture_mode for c in contracts)
 
     if fixture_only:

@@ -193,7 +193,7 @@ def _build_system_prompt(
         "an artifact you have already retrieved in a previous step. Re-read the earlier result instead. "
         "When you have enough information, call submit_answer "
         "with a JSON object matching the required schema. ",
-        f"\nQuestion type: TASK",
+        "\nQuestion type: TASK",
         f"\nRequired answer schema:\n{schema_str}",
     ]
 

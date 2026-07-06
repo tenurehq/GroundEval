@@ -1,22 +1,17 @@
 from __future__ import annotations
 
-import copy
 import json
 import logging
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 import yaml
 
-from .core import (
-    AgentTrajectory,
-    ToolCall,
-    TaskPrecondition,
-    AllowedTool,
-    TaskContract,
-)
+from .adapters import YamlAccessPolicy
+from .core import AgentTrajectory, TaskContract, ToolCall
+from .scorers import aggregate_task_results, score_framework_observed_run
 
 logger = logging.getLogger("groundeval.observe")
 
@@ -32,6 +27,12 @@ class ObservedToolCall:
     arguments: dict[str, Any]
     return_value: Any
     latency_ms: float
+    agent_id: str | None = None
+    agent_name: str | None = None
+    node_name: str | None = None
+    workflow_run_id: str | None = None
+    branch_id: str | None = None
+    parent_event_id: str | None = None
 
 
 @dataclass
@@ -40,8 +41,9 @@ class ObservedRun:
     framework: str
     agent_class: str
     tool_calls: list[ObservedToolCall] = field(default_factory=list)
-    final_answer: dict[str, Any] = field(default_factory=dict)
+    final_answer: Any = None
     total_latency_ms: float = 0.0
+    framework_extra: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -53,15 +55,15 @@ class ObservedRun:
             framework=d["framework"],
             agent_class=d["agent_class"],
             tool_calls=[ObservedToolCall(**tc) for tc in d.get("tool_calls", [])],
-            final_answer=d.get("final_answer", {}),
+            final_answer=d.get("final_answer"),
             total_latency_ms=d.get("total_latency_ms", 0.0),
+            framework_extra=d.get("framework_extra"),
         )
 
 
 class RecordingRuntime:
     def __init__(self):
         self._call_log: list[ObservedToolCall] = []
-        self._trajectory_log: list[ToolCall] = []
 
     def record(
         self,
@@ -69,6 +71,12 @@ class RecordingRuntime:
         arguments: dict[str, Any],
         return_value: Any,
         latency_ms: float,
+        agent_id: str | None = None,
+        agent_name: str | None = None,
+        node_name: str | None = None,
+        workflow_run_id: str | None = None,
+        branch_id: str | None = None,
+        parent_event_id: str | None = None,
     ) -> None:
         self._call_log.append(
             ObservedToolCall(
@@ -76,6 +84,12 @@ class RecordingRuntime:
                 arguments=arguments,
                 return_value=return_value,
                 latency_ms=latency_ms,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                node_name=node_name,
+                workflow_run_id=workflow_run_id,
+                branch_id=branch_id,
+                parent_event_id=parent_event_id,
             )
         )
 
@@ -86,38 +100,17 @@ class RecordingRuntime:
 
 @runtime_checkable
 class AgentObserver(Protocol):
-    """Protocol for framework-specific agent observability adapters.
-
-    Each adapter implementation handles loading, instrumenting, and
-    executing an agent for a particular agent framework (CrewAI,
-    LangChain, AutoGen, etc.).  The observe_agent() dispatcher calls
-    these methods so the rest of the observation pipeline (recording,
-    draft generation) stays framework-agnostic.
-
-    Implement this protocol once per framework and register it in
-    _OBSERVER_REGISTRY.
-    """
-
-    def load_agent(self, class_path: str) -> Any:
-        """Import and return an agent instance given a dotted path."""
-        ...
+    def load_agent(self, class_path: str) -> Any: ...
 
     def instrument_agent(
         self,
         agent: Any,
         recording: RecordingRuntime,
-        tool_map: dict[str, str] | None,
-    ) -> Any:
-        """Deep-copy *agent*, wrap tools with recording hooks, return copy."""
-        ...
+    ) -> Any: ...
 
-    def execute_agent(self, agent: Any) -> Any:
-        """Run the instrumented agent and return its raw result."""
-        ...
+    def execute_agent(self, agent: Any) -> Any: ...
 
-    def set_max_steps(self, agent: Any, max_steps: int) -> None:
-        """Configure a step / iteration limit on the agent if supported."""
-        ...
+    def set_max_steps(self, agent: Any, max_steps: int) -> None: ...
 
 
 _OBSERVER_REGISTRY: dict[str, AgentObserver] = {}
@@ -147,84 +140,54 @@ def _try_auto_register(framework: str) -> None:
             register_observer("crewai", CrewAIObserver())
         except ImportError:
             pass
-
-
-def _tool_name_to_verb(tool_name: str) -> str:
-    lower = tool_name.lower()
-    search_words = ("search", "query", "find", "list", "discover")
-    fetch_words = ("fetch", "get", "retrieve", "read", "lookup")
-    for w in search_words:
-        if w in lower:
-            return "search"
-    for w in fetch_words:
-        if w in lower:
-            return "fetch"
-    return "fetch"
-
-
-def _extract_return_schema_from_tool(tool: Any) -> dict | None:
-    import inspect
-
-    func = None
-    if "_run" in tool.__dict__:
-        func = tool._run
-    elif "func" in tool.__dict__:
-        func = tool.func
-
-    if func is not None:
+    elif framework == "maf":
         try:
-            hints = getattr(func, "__annotations__", {})
-            return_type = hints.get("return")
-            if return_type is not None and hasattr(return_type, "model_json_schema"):
-                return return_type.model_json_schema()
-        except Exception:
+            from .framework_adapters.maf_adapter import MafObserver
+
+            register_observer("maf", MafObserver())
+        except ImportError:
+            pass
+    elif framework == "langgraph":
+        try:
+            from .framework_adapters.langgraph_adapter import LangGraphObserver
+
+            register_observer("langgraph", LangGraphObserver())
+        except ImportError:
             pass
 
-    args_schema = None
-    if "args_schema" in tool.__dict__:
-        args_schema = tool.args_schema
 
-    if args_schema is not None and hasattr(args_schema, "model_json_schema"):
-        try:
-            return args_schema.model_json_schema()
-        except Exception:
-            pass
-
-    if func is not None:
-        try:
-            sig = inspect.signature(func)
-            hint = sig.return_annotation
-            if hint is not inspect.Parameter.empty and hasattr(
-                hint, "model_json_schema"
-            ):
-                return hint.model_json_schema()
-        except Exception:
-            pass
-
-    return None
+def _parse_json_string(value: str) -> Any:
+    stripped = value.strip()
+    if not stripped or stripped[0] not in '[{"':
+        return value
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        if _json_repair is not None:
+            try:
+                repaired = _json_repair.repair_json(value)
+                if isinstance(repaired, str):
+                    return json.loads(repaired)
+                return repaired
+            except Exception:
+                return value
+        return value
 
 
-def _parse_observed_answer(result: Any) -> dict[str, Any]:
-    raw = getattr(result, "raw", "")
-    if isinstance(raw, dict):
+def _parse_observed_answer(result: Any) -> Any:
+    if result is None:
+        return None
+    if isinstance(result, str):
+        return _parse_json_string(result)
+    if isinstance(result, (dict, list, int, float, bool)):
+        return result
+
+    raw = getattr(result, "raw", None)
+    if isinstance(raw, (dict, list)):
         return raw
     if isinstance(raw, str) and raw.strip():
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            if _json_repair is not None:
-                try:
-                    repaired = _json_repair.repair_json(raw)
-                    if isinstance(repaired, str):
-                        parsed = json.loads(repaired)
-                        if isinstance(parsed, dict):
-                            return parsed
-                    elif isinstance(repaired, dict):
-                        return repaired
-                except Exception:
-                    pass
+        return _parse_json_string(raw)
+
     if hasattr(result, "pydantic") and result.pydantic is not None:
         pydantic_result = result.pydantic
         if hasattr(pydantic_result, "model_dump") and callable(
@@ -237,30 +200,53 @@ def _parse_observed_answer(result: Any) -> dict[str, Any]:
             return dict(pydantic_result)
         except Exception:
             pass
-    return {"raw_output": str(result)[:1000]}
+
+    if hasattr(result, "model_dump") and callable(result.model_dump):
+        try:
+            return result.model_dump()
+        except Exception:
+            pass
+
+    if hasattr(result, "to_dict") and callable(result.to_dict):
+        try:
+            return result.to_dict()
+        except Exception:
+            pass
+
+    return str(result)
 
 
 def observe_agent(
     framework: str,
     class_path: str,
-    tool_map: dict[str, str] | None = None,
     max_steps: int = 10,
 ) -> ObservedRun:
     observer = _get_observer(framework)
-
     agent = observer.load_agent(class_path)
     recording = RecordingRuntime()
-
     run_id = f"observed_{class_path.replace('.', '_')}_{int(time.time())}"
 
-    instrumented = observer.instrument_agent(agent, recording, tool_map)
+    instrumented = observer.instrument_agent(agent, recording)
     observer.set_max_steps(instrumented, max_steps)
 
     t_start = time.time()
     result = observer.execute_agent(instrumented)
     total_latency = (time.time() - t_start) * 1000
-
     final_answer = _parse_observed_answer(result)
+
+    framework_extra = None
+    rich_run = getattr(instrumented, "_groundeval_framework_observed_run", None)
+    if rich_run is not None and hasattr(rich_run, "to_dict"):
+        try:
+            framework_extra = rich_run.to_dict()
+            if getattr(rich_run, "run_id", None):
+                run_id = str(rich_run.run_id)
+            if getattr(rich_run, "final_output", None) is not None:
+                final_answer = rich_run.final_output
+            if getattr(rich_run, "total_latency_ms", None) is not None:
+                total_latency = float(rich_run.total_latency_ms)
+        except Exception:
+            framework_extra = None
 
     return ObservedRun(
         run_id=run_id,
@@ -269,21 +255,99 @@ def observe_agent(
         tool_calls=recording.call_log,
         final_answer=final_answer,
         total_latency_ms=total_latency,
+        framework_extra=framework_extra,
     )
 
 
 def observe_crew(
     agent_class_path: str,
-    tool_map: dict[str, str] | None = None,
     max_steps: int = 10,
 ) -> ObservedRun:
-    """Deprecated: use observe_agent(framework='crewai', ...) instead."""
     return observe_agent(
         framework="crewai",
         class_path=agent_class_path,
-        tool_map=tool_map,
         max_steps=max_steps,
     )
+
+
+def _is_empty_return_value(value: Any) -> bool:
+    return value is None or value == {} or value == []
+
+
+def _observed_run_to_trajectory(observed: ObservedRun, task_id: str) -> AgentTrajectory:
+    tool_calls = [
+        ToolCall(
+            tool_name=tc.tool_name,
+            arguments=dict(tc.arguments or {}),
+            result_ids=[],
+            timestamp_applied=None,
+            horizon_violation=False,
+            actor_gate_violation=False,
+            subsystem_violation=False,
+            returned_empty=_is_empty_return_value(tc.return_value),
+            latency_ms=float(tc.latency_ms),
+            agent_name=tc.agent_name,
+            node_name=tc.node_name,
+            workflow_run_id=tc.workflow_run_id,
+            branch_id=tc.branch_id,
+            parent_event_id=tc.parent_event_id,
+        )
+        for tc in observed.tool_calls
+    ]
+    final_answer = (
+        observed.final_answer if isinstance(observed.final_answer, dict) else {}
+    )
+    return AgentTrajectory(
+        task_id=task_id,
+        tool_calls=tool_calls,
+        final_answer=final_answer,
+        total_latency_ms=float(observed.total_latency_ms),
+    )
+
+
+def score_observed_run(
+    observed: ObservedRun,
+    cfg: dict[str, Any],
+    config_path: str | Path | None = None,
+) -> tuple[list[Any], dict[str, Any]]:
+    contracts = [TaskContract.from_dict(tc) for tc in cfg.get("task_contracts", [])]
+    actors = cfg.get("actors", {})
+    roles = cfg.get("roles", {})
+    policy = YamlAccessPolicy({"actors": actors, "roles": roles})
+
+    results = []
+    trajectories = []
+
+    for contract in contracts:
+        trajectory = _observed_run_to_trajectory(observed, task_id=contract.name)
+        final_answer = (
+            observed.final_answer if isinstance(observed.final_answer, dict) else {}
+        )
+        result = score_framework_observed_run(
+            trajectory=trajectory,
+            final_answer=final_answer,
+            contract=contract,
+            policy=policy,
+            actor=contract.actor,
+            role=contract.role,
+        )
+        results.append(result)
+        trajectories.append(trajectory.to_dict())
+
+    summary = aggregate_task_results(results)
+    payload = {
+        "meta": {
+            "framework": observed.framework,
+            "agent_class": observed.agent_class,
+            "run_id": observed.run_id,
+            "framework_native_scoring": True,
+            "config_path": str(config_path) if config_path is not None else None,
+        },
+        "summary": summary,
+        "results": [r.to_dict() for r in results],
+        "trajectories": trajectories,
+    }
+    return results, payload
 
 
 class DraftGenerator:
@@ -292,13 +356,11 @@ class DraftGenerator:
         self._mode = mode
 
     def generate(self) -> dict[str, Any]:
-        tool_map_entries = self._infer_tool_map()
         preconditions = self._infer_preconditions()
-        allowed_tools = self._infer_allowed_tools()
-        roles = self._infer_roles()
+        tool_expectations = self._infer_tool_expectations()
 
         decision_field = "should_act"
-        if self._observed.final_answer:
+        if isinstance(self._observed.final_answer, dict):
             for candidate in (
                 "should_act",
                 "all_preconditions_pass",
@@ -316,17 +378,15 @@ class DraftGenerator:
             "decision_field": decision_field,
         }
 
-        if allowed_tools:
-            task_contract["allowed_tools"] = allowed_tools
+        if tool_expectations:
+            task_contract["tool_expectations"] = tool_expectations
 
-        config = {
+        return {
             "output_dir": "./eval_output",
             "agent": {
                 "framework": self._observed.framework,
                 "agent_class": self._observed.agent_class,
-                "tool_map": tool_map_entries,
             },
-            "roles": roles,
             "task_contracts": [task_contract],
             "groundeval": {
                 "config_status": "draft",
@@ -337,19 +397,12 @@ class DraftGenerator:
             },
         }
 
-        return config
-
-    def _infer_tool_map(self) -> dict[str, str]:
-        tool_map: dict[str, str] = {}
-        seen = set()
-        for tc in self._observed.tool_calls:
-            if tc.tool_name not in seen:
-                seen.add(tc.tool_name)
-                tool_map[tc.tool_name] = _tool_name_to_verb(tc.tool_name)
-        return tool_map
-
     def _infer_preconditions(self) -> list[dict[str, Any]]:
-        answer = self._observed.final_answer or {}
+        answer = (
+            self._observed.final_answer
+            if isinstance(self._observed.final_answer, dict)
+            else {}
+        )
         preconditions_verified = answer.get("preconditions_verified", [])
 
         if preconditions_verified:
@@ -358,186 +411,82 @@ class DraftGenerator:
         if self._mode == "conservative":
             return []
 
-        return self._infer_from_tool_patterns()
+        return self._infer_from_tool_calls()
 
     def _infer_from_structured_answer(
         self, preconditions_verified: list[dict]
     ) -> list[dict[str, Any]]:
         preconditions = []
+        observed_tool_names = [tc.tool_name for tc in self._observed.tool_calls]
+        default_required_tool = observed_tool_names[0] if observed_tool_names else ""
+
         for pc in preconditions_verified:
             check = pc.get("check", "unknown_check")
             facts = pc.get("facts_found", {})
-            evidence = pc.get("evidence_artifacts", [])
-
-            fact_keys = list(facts.keys()) if facts else []
-            gt_field = ""
-            if fact_keys and evidence:
-                gt_field = f"{evidence[0]}.{fact_keys[0]}"
-
-            inferred_reason = f"Observed check '{check}' in agent answer."
-            if evidence:
-                inferred_reason += f" Evidence artifacts: {evidence}."
-
-            preconditions.append({
+            fact_keys = list(facts.keys()) if isinstance(facts, dict) else []
+            precondition = {
                 "check": check,
                 "description": f"Agent must verify: {check}",
                 "required_facts": fact_keys,
-                "ground_truth_field": gt_field,
                 "review_required": True,
                 "inferred_from": {
                     "run_id": self._observed.run_id,
                     "source": "structured_answer",
-                    "reason": inferred_reason,
+                    "reason": f"Observed check '{check}' in agent answer.",
                 },
-            })
+            }
+            if default_required_tool:
+                precondition["required_tool"] = default_required_tool
+            if fact_keys:
+                precondition["expected_field"] = fact_keys[0]
+            preconditions.append(precondition)
 
         return preconditions
 
-    def _infer_from_tool_patterns(self) -> list[dict[str, Any]]:
-        if self._mode == "conservative":
-            return []
-
-        fetch_calls = [
-            tc
-            for tc in self._observed.tool_calls
-            if _tool_name_to_verb(tc.tool_name) == "fetch"
-        ]
-
+    def _infer_from_tool_calls(self) -> list[dict[str, Any]]:
         preconditions = []
-        for tc in fetch_calls:
-            check_name = (
-                tc.tool_name
-                .replace("fetch_", "")
-                .replace("get_", "")
-                .replace("retrieve_", "")
-            )
-            check = f"{check_name}_verified"
-
-            return_val = tc.return_value
-            fact_keys = []
-            if isinstance(return_val, dict):
-                fact_keys = [
-                    k
-                    for k in return_val.keys()
-                    if k not in ("id", "_id", "subsystem", "timestamp", "type")
-                ]
-
-            preconditions.append({
-                "check": check,
-                "description": f"Agent must verify {check_name}.",
-                "required_facts": fact_keys,
-                "ground_truth_field": "",
+        for tc in self._observed.tool_calls:
+            precondition = {
+                "check": f"{tc.tool_name}_observed",
+                "description": f"Observed native tool call '{tc.tool_name}'.",
+                "required_facts": list(tc.return_value.keys())
+                if isinstance(tc.return_value, dict)
+                else [],
+                "required_tool": tc.tool_name,
                 "review_required": True,
                 "inferred_from": {
                     "run_id": self._observed.run_id,
                     "source": "tool_call",
                     "tool_name": tc.tool_name,
-                    "reason": f"Inferred from observed fetch call to '{tc.tool_name}'.",
-                },
-            })
-
-        if self._mode == "aggressive":
-            search_calls = [
-                tc
-                for tc in self._observed.tool_calls
-                if _tool_name_to_verb(tc.tool_name) == "search"
-            ]
-            for tc in search_calls:
-                check_name = (
-                    tc.tool_name
-                    .replace("search_", "")
-                    .replace("query_", "")
-                    .replace("find_", "")
-                )
-                check = f"{check_name}_performed"
-                preconditions.append({
-                    "check": check,
-                    "description": f"Agent must search {check_name}.",
-                    "required_facts": [],
-                    "ground_truth_field": "",
-                    "review_required": True,
-                    "inferred_from": {
-                        "run_id": self._observed.run_id,
-                        "source": "tool_call",
-                        "tool_name": tc.tool_name,
-                        "reason": f"Inferred from observed search call to '{tc.tool_name}'. May not be a required precondition.",
-                    },
-                })
-
-        return preconditions
-
-    def _infer_allowed_tools(self) -> dict[str, dict[str, Any]]:
-        allowed: dict[str, dict[str, Any]] = {}
-        seen = set()
-
-        for tc in self._observed.tool_calls:
-            if tc.tool_name in seen:
-                continue
-            seen.add(tc.tool_name)
-
-            verb = _tool_name_to_verb(tc.tool_name)
-
-            entry: dict[str, Any] = {
-                "review_required": True,
-                "inferred_from": {
-                    "run_id": self._observed.run_id,
-                    "reason": f"Observed call to '{tc.tool_name}' with arguments {list(tc.arguments.keys())}.",
+                    "reason": f"Inferred directly from observed native tool call '{tc.tool_name}'.",
                 },
             }
+            if isinstance(tc.return_value, dict) and tc.return_value:
+                precondition["expected_field"] = next(iter(tc.return_value.keys()))
+            preconditions.append(precondition)
+        return preconditions
 
-            entity_arg = ""
-            for arg_name in tc.arguments.keys():
-                if arg_name.lower() in (
-                    "artifact_id",
-                    "ticket_id",
-                    "customer_id",
-                    "id",
-                    "entity_id",
-                ):
-                    entity_arg = arg_name
-                    break
-            if entity_arg:
-                entry["entity_arg"] = entity_arg
-
-            if isinstance(tc.return_value, dict):
-                stripped = {
-                    k: v
-                    for k, v in tc.return_value.items()
-                    if k not in ("id", "_id", "subsystem", "timestamp", "type")
-                    and not isinstance(v, (dict, list))
-                }
-                if stripped:
-                    entry["returns"] = stripped
-
-            artifact_id = entity_arg or tc.tool_name
-            entry["artifact_id"] = artifact_id
-
-            allowed[tc.tool_name] = entry
-
-        return allowed
-
-    def _infer_roles(self) -> dict[str, dict[str, Any]]:
-        subsystems: set[str] = set()
+    def _infer_tool_expectations(self) -> list[dict[str, Any]]:
+        expectations = []
+        seen = set()
         for tc in self._observed.tool_calls:
-            return_val = tc.return_value
-            if isinstance(return_val, dict):
-                sub = return_val.get("subsystem", "")
-                if sub:
-                    subsystems.add(sub)
-
-        if not subsystems:
-            return {}
-
-        return {
-            "agent": {
-                "subsystems": sorted(subsystems),
+            key = (tc.tool_name, json.dumps(tc.arguments, default=str, sort_keys=True))
+            if key in seen:
+                continue
+            seen.add(key)
+            expectation = {
+                "tool": tc.tool_name,
+                "match_args": tc.arguments,
                 "review_required": True,
                 "inferred_from": {
                     "run_id": self._observed.run_id,
-                    "reason": "Subsystems inferred from tool names and return values.",
+                    "reason": f"Observed native tool call '{tc.tool_name}'.",
                 },
-            },
-        }
+            }
+            if isinstance(tc.return_value, dict):
+                expectation["expected_return"] = tc.return_value
+            expectations.append(expectation)
+        return expectations
 
     def generate_review_checklist(self) -> str:
         lines = [
@@ -545,7 +494,7 @@ class DraftGenerator:
             "",
             f"Config generated from observed run: `{self._observed.run_id}`",
             f"Framework: {self._observed.framework}",
-            f"Crew class: {self._observed.agent_class}",
+            f"Agent class: {self._observed.agent_class}",
             f"Draft mode: {self._mode}",
             "",
             "## Before you can use this config for deterministic scoring:",
@@ -560,65 +509,47 @@ class DraftGenerator:
                 lines.append(
                     f"- [ ] **{pc['check']}**: {pc.get('inferred_from', {}).get('reason', 'Review needed.')}"
                 )
-                if pc.get("ground_truth_field"):
-                    lines.append(
-                        f"  - Ground truth field: `{pc['ground_truth_field']}` — verify this is the canonical source of truth."
-                    )
+                if pc.get("required_tool"):
+                    lines.append(f"  - Required native tool: `{pc['required_tool']}`")
                 if pc.get("required_facts"):
-                    lines.append(
-                        f"  - Required facts: {pc['required_facts']} — verify these are all necessary and sufficient."
-                    )
+                    lines.append(f"  - Required facts: {pc['required_facts']}")
             lines.append("")
 
-        allowed = self._infer_allowed_tools()
-        if allowed:
-            lines.append("### Allowed Tools / Fixture Returns")
+        expectations = self._infer_tool_expectations()
+        if expectations:
+            lines.append("### Observed Native Tools")
             lines.append("")
-            for name, cfg in allowed.items():
+            for item in expectations:
                 lines.append(
-                    f"- [ ] **{name}**: entity_arg=`{cfg.get('entity_arg', '')}`, artifact_id=`{cfg.get('artifact_id', '')}`"
-                )
-                returns = cfg.get("returns", {})
-                if returns:
-                    lines.append(
-                        f"  - Returns: {returns} — verify these are the correct ground truth values."
-                    )
-            lines.append("")
-
-        roles = self._infer_roles()
-        if roles:
-            lines.append("### Roles and Subsystem Access")
-            lines.append("")
-            for role_name, role_cfg in roles.items():
-                lines.append(
-                    f"- [ ] **{role_name}**: subsystems={role_cfg.get('subsystems', [])} — verify allowed access boundaries."
+                    f"- [ ] **{item['tool']}**: verify exact native tool name, arguments, and return behavior."
                 )
             lines.append("")
 
         lines.append("### Decision Field")
         decision_field = "should_act"
-        answer = self._observed.final_answer or {}
+        answer = (
+            self._observed.final_answer
+            if isinstance(self._observed.final_answer, dict)
+            else {}
+        )
         for candidate in ("should_act", "all_preconditions_pass", "should_escalate"):
             if candidate in answer:
                 decision_field = candidate
                 break
-        lines.append(
-            f"- [ ] `decision_field: {decision_field}` — verify this matches your domain convention."
-        )
+        lines.append(f"- [ ] `decision_field: {decision_field}`")
         lines.append("")
-
         lines.append("### General")
         lines.append("")
         lines.append("- [ ] Task description updated from inferred placeholder.")
-        lines.append(
-            "- [ ] Valid action logic (`all_preconditions_pass`) matches domain rules."
-        )
-        lines.append("- [ ] Artifact ground truth values verified as canonical.")
+        lines.append("- [ ] Required native tools reflect the reviewed contract.")
+        lines.append("- [ ] Tool expectations only include behavior you want scored.")
         lines.append("")
         lines.append("## After review")
         lines.append("")
         lines.append("Run: `groundeval validate --config draft_config/config.yaml`")
-        lines.append("Then: `groundeval task --config draft_config/config.yaml`")
+        lines.append(
+            "Then: `groundeval observe --framework <framework> --agent-class <path> --config draft_config/config.yaml --score`"
+        )
         lines.append("")
         lines.append(
             "Or mark as reviewed: update `groundeval.config_status` to `reviewed` and `groundeval.reviewed` to `true`."
@@ -633,7 +564,7 @@ class DraftGenerator:
             "",
             f"Run ID: `{self._observed.run_id}`",
             f"Framework: {self._observed.framework}",
-            f"Crew class: {self._observed.agent_class}",
+            f"Agent class: {self._observed.agent_class}",
             f"Total latency: {self._observed.total_latency_ms:.0f}ms",
             f"Tool calls recorded: {len(self._observed.tool_calls)}",
             "",
@@ -645,6 +576,10 @@ class DraftGenerator:
             lines.append(f"### {i + 1}. {tc.tool_name}")
             lines.append(f"- Arguments: {json.dumps(tc.arguments, default=str)}")
             lines.append(f"- Latency: {tc.latency_ms:.0f}ms")
+            if tc.agent_name or tc.agent_id:
+                lines.append(f"- Agent: {tc.agent_name or ''} ({tc.agent_id or ''})")
+            if tc.node_name:
+                lines.append(f"- Node: {tc.node_name}")
             return_preview = json.dumps(tc.return_value, default=str)
             if len(return_preview) > 500:
                 return_preview = return_preview[:500] + "..."
@@ -657,15 +592,10 @@ class DraftGenerator:
         lines.append(json.dumps(self._observed.final_answer, indent=2, default=str))
         lines.append("```")
         lines.append("")
-
         lines.append("## Generated Draft Config")
         lines.append("")
         lines.append(
-            "GroundEval drafted a config from this observed behavior. "
-            "Review is required before deterministic scoring because observed "
-            "behavior is not ground truth. The agent may have called the wrong "
-            "tool, retrieved the wrong artifact, skipped a required check, or "
-            "relied on a field that should not define correctness."
+            "GroundEval drafted a config from this observed framework behavior. Review is required before deterministic scoring."
         )
         lines.append("")
         lines.append("See `draft_config/REVIEW.md` for the review checklist.")
@@ -693,17 +623,6 @@ def write_draft_output(
             config, f, default_flow_style=False, sort_keys=False, allow_unicode=True
         )
 
-    tool_map = config.get("agent", {}).get("tool_map", {})
-    tool_map_path = draft_dir / "tool_map.yaml"
-    with open(tool_map_path, "w") as f:
-        yaml.dump(
-            {"tool_map": tool_map},
-            f,
-            default_flow_style=False,
-            sort_keys=False,
-            allow_unicode=True,
-        )
-
     task_contracts_dir = draft_dir / "task_contracts"
     task_contracts_dir.mkdir(parents=True, exist_ok=True)
     contracts = config.get("task_contracts", [])
@@ -714,21 +633,6 @@ def write_draft_output(
             yaml.dump(
                 tc, f, default_flow_style=False, sort_keys=False, allow_unicode=True
             )
-
-    artifacts_dir = draft_dir / "artifacts" / "observed"
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-    for i, tc in enumerate(observed.tool_calls, start=1):
-        if isinstance(tc.return_value, dict):
-            artifact = dict(tc.return_value)
-            artifact_id = artifact.get("id") or artifact.get("_id") or tc.tool_name
-            artifact.setdefault("id", artifact_id)
-            artifact.setdefault("source", "observed")
-            artifact.setdefault("observed_run_id", observed.run_id)
-            safe_name = tc.tool_name.replace("/", "_").replace(" ", "_")
-            unique_id = artifact_id.replace("/", "_").replace(" ", "_")
-            artifact_path = artifacts_dir / f"{i:03d}_{safe_name}_{unique_id}.json"
-            with open(artifact_path, "w") as f:
-                json.dump(artifact, f, indent=2, default=str)
 
     review_path = draft_dir / "REVIEW.md"
     with open(review_path, "w") as f:

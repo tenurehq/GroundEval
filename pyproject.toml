@@ -15,10 +15,8 @@ dependencies = [
     "jsonschema>=4.26.0",
     "openai>=2.43.0",
     "pyyaml>=6.0",
+    "reportlab>=5.0.0",
 ]
-
-[project.optional-dependencies]
-crewai = ["crewai>=1.14.7"]
 
 [project.scripts]
 groundeval = "groundeval.run:main"
@@ -27,7 +25,10 @@ groundeval = "groundeval.run:main"
 dev = [
     "ruff>=0.4.0",
     "pytest",
+    "pytest-cov>=7.1.0",
 ]
+crewai = ["crewai>=1.14.7"]
+maf = ["agent-framework"]
 
 [tool.setuptools_scm]
 
@@ -38,10 +39,12 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 
-
 [tool.ruff]
 src = ["src"]
 format.preview = true
 
 [tool.ruff.lint]
 select = ["E", "F", "B"]
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 150

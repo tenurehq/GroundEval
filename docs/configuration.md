@@ -195,11 +195,11 @@ Use task-level results when the aggregate score is too broad to debug.
 
 A precondition result answers:
 
-* Was this check present in the contract?
-* Did the agent claim it verified the check?
-* Did the answer include the required facts?
-* Did the cited evidence support those facts?
-* Which artifact field was used as ground truth?
+- Was this check present in the contract?
+- Did the agent claim it verified the check?
+- Did the answer include the required facts?
+- Did the cited evidence support those facts?
+- Which artifact field was used as ground truth?
 
 This is usually the first place to look when Silence or Counterfactual is low.
 
@@ -253,11 +253,11 @@ A tool call with `returned_empty: true` means the runtime returned no visible re
 
 This can happen because:
 
-* the artifact does not exist
-* the artifact exists but is outside the actor's visibility
-* the artifact exists but is from after the cutoff time
-* the artifact exists but is in a subsystem the role cannot access
-* the search query did not match anything
+- the artifact does not exist
+- the artifact exists but is outside the actor's visibility
+- the artifact exists but is from after the cutoff time
+- the artifact exists but is in a subsystem the role cannot access
+- the search query did not match anything
 
 GroundEval also tracks:
 
@@ -300,24 +300,36 @@ If the agent returns unparseable free text, GroundEval may still complete the ru
 Observe Mode writes a different kind of report.
 
 ```bash
-uv run python -m groundeval observe \
-  --framework crewai \
-  --crew-class my_project.crew.MyCrew \
-  --output eval_output
+uv run python -m groundeval observe   --framework crewai   --agent-class my_project.crew.MyCrew   --output eval_output
 ```
 
-Observation writes:
+Observation now writes:
 
 ```text
 eval_output/
   observed_run.json
   observe_report.md
+  observe_diagram.pdf
   draft_config/
     config.yaml
-    tool_map.yaml
     REVIEW.md
     task_contracts/
-    artifacts/
+      inferred_task.yaml
+```
+
+Depending on framework data, observe mode may also write:
+
+```text
+eval_output/
+  observed_run_crewai.json
+```
+
+or:
+
+```text
+eval_output/
+  observed_run_maf.json
+  observe_report_maf.md
 ```
 
 Observation is not scoring.
@@ -326,13 +338,30 @@ The observation report tells you what GroundEval saw during the run. It is used 
 
 Use it to answer:
 
-* Which tools did the agent call?
-* What did those tools return?
-* What final answer did the agent produce?
-* What config did GroundEval infer?
-* What still needs human review?
+- Which tools did the agent call?
+- What did those tools return?
+- What final answer did the agent produce?
+- What config did GroundEval infer?
+- What still needs human review?
 
 The generated config remains a draft until you review it.
+
+## Observe diagram
+
+Observe mode also writes `observe_diagram.pdf`.
+
+The diagram is a fast visual summary of the observed behavior. It is not a scored artifact and it is not contract-aware.
+
+It shows:
+
+- tool calls in order
+- compact argument and return summaries
+- evidence tags when normalized evidence is available
+- one swimlane per observed agent when agent information exists
+- handoff arrows only when normalized handoff records exist
+- final answer
+
+The current renderer uses a top-to-bottom layout with a single global timeline across all lanes.
 
 ## How to debug common report patterns
 
@@ -342,17 +371,17 @@ The agent got the final answer right but skipped required checks.
 
 What to inspect:
 
-* `precondition_results`
-* missing `check` names
-* missing `required_facts`
-* the submitted `preconditions_verified` field
+- `precondition_results`
+- missing `check` names
+- missing `required_facts`
+- the submitted `preconditions_verified` field
 
 Likely fix:
 
-* tighten the task instruction
-* add clearer precondition descriptions
-* make sure the output schema is reaching the agent
-* add or correct tool access for the missing evidence
+- tighten the task instruction
+- add clearer precondition descriptions
+- make sure the output schema is reaching the agent
+- add or correct tool access for the missing evidence
 
 ### High accuracy, low Counterfactual
 
@@ -360,17 +389,17 @@ The agent reached the right decision but the evidence did not support its claims
 
 What to inspect:
 
-* cited artifacts
-* `ground_truth_field`
-* observed versus expected fact values
-* whether search results were used as if they were full fetched artifacts
+- cited artifacts
+- `ground_truth_field`
+- observed versus expected fact values
+- whether search results were used as if they were full fetched artifacts
 
 Likely fix:
 
-* require fetch after search
-* make ground-truth fields more explicit
-* ensure fixture `returns` contain the required facts
-* make the agent cite artifact IDs for each precondition
+- require fetch after search
+- make ground-truth fields more explicit
+- ensure fixture `returns` contain the required facts
+- make the agent cite artifact IDs for each precondition
 
 ### Low Perspective
 
@@ -378,19 +407,19 @@ The agent crossed an access boundary.
 
 What to inspect:
 
-* `roles`
-* `actors`
-* `subsystem_violations`
-* `actor_gate_violations`
-* `horizon_violations`
-* tool call arguments
+- `roles`
+- `actors`
+- `subsystem_violations`
+- `actor_gate_violations`
+- `horizon_violations`
+- tool call arguments
 
 Likely fix:
 
-* correct the role's allowed subsystems
-* correct the task actor or role
-* move an artifact into the right subsystem if the config is wrong
-* keep the violation if the agent really attempted out-of-bounds access
+- correct the role's allowed subsystems
+- correct the task actor or role
+- move an artifact into the right subsystem if the config is wrong
+- keep the violation if the agent really attempted out-of-bounds access
 
 Do not paper over a Perspective failure just because the answer was useful. That is the point of the track.
 
@@ -400,20 +429,20 @@ The agent kept searching or fetching things that returned nothing.
 
 What to inspect:
 
-* `dead_ends_hit`
-* `dead_ends_recovered`
-* tool call arguments
-* artifact IDs
-* search queries
-* visibility and timestamp gates
+- `dead_ends_hit`
+- `dead_ends_recovered`
+- tool call arguments
+- artifact IDs
+- search queries
+- visibility and timestamp gates
 
 Likely fix:
 
-* pass stable IDs through `inputs`
-* improve tool descriptions
-* fix `entity_arg` in fixture mode
-* check whether the role can access the subsystem
-* check whether artifacts are after the cutoff time
+- pass stable IDs through `inputs`
+- improve tool descriptions
+- fix `entity_arg` in fixture mode
+- check whether the role can access the subsystem
+- check whether artifacts are after the cutoff time
 
 ### Zero score
 
@@ -421,14 +450,14 @@ A zero usually means the scorer could not connect the answer, evidence, and cont
 
 Check these first:
 
-* Did the config have preconditions?
-* Did each precondition have `required_facts`?
-* Did each precondition have a dotted `ground_truth_field`?
-* Did the agent return parseable JSON?
-* Did the answer include `preconditions_verified`?
-* Did the answer include the configured `decision_field`?
-* Did fixture mode define useful `returns`?
-* Did corpus mode have JSON artifacts in `artifacts_dir`?
+- Did the config have preconditions?
+- Did each precondition have `required_facts`?
+- Did each precondition have a dotted `ground_truth_field`?
+- Did the agent return parseable JSON?
+- Did the answer include `preconditions_verified`?
+- Did the answer include the configured `decision_field`?
+- Did fixture mode define useful `returns`?
+- Did corpus mode have JSON artifacts in `artifacts_dir`?
 
 Zero is not always a model failure. It is often a config or output-shape failure.
 
