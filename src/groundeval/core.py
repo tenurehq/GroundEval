@@ -22,6 +22,8 @@ class ToolCall:
     branch_id: str | None = None
     call_id: str | None = None
     parent_event_id: str | None = None
+    agent_id: str | None = None
+    observed_return_value: Any = None
 
 
 @dataclass
@@ -40,6 +42,8 @@ class AgentTrajectory:
     dead_ends_recovered: int = 0
     budget_exceeded: bool = False
     events: list = field(default_factory=list)
+    observed_agents: list[dict[str, Any]] = field(default_factory=list)
+    observed_handoffs: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -52,11 +56,11 @@ class ToolExpectation:
     expected_return: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> 'ToolExpectation':
+    def from_dict(cls, d: dict[str, Any]) -> "ToolExpectation":
         return cls(
-            tool=str(d.get('tool', '')),
-            match_args=dict(d.get('match_args', {})),
-            expected_return=dict(d.get('expected_return', {})),
+            tool=str(d.get("tool", "")),
+            match_args=dict(d.get("match_args", {})),
+            expected_return=dict(d.get("expected_return", {})),
         )
 
     def to_dict(self) -> dict:
@@ -68,19 +72,19 @@ class TaskPrecondition:
     check: str
     description: str
     required_facts: list[str] = field(default_factory=list)
-    ground_truth_field: str = ''
-    required_tool: str = ''
-    expected_field: str = ''
+    ground_truth_field: str = ""
+    required_tool: str = ""
+    expected_field: str = ""
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'TaskPrecondition':
+    def from_dict(cls, d: dict) -> "TaskPrecondition":
         return cls(
-            check=d['check'],
-            description=d.get('description', d['check']),
-            required_facts=list(d.get('required_facts', [])),
-            ground_truth_field=d.get('ground_truth_field', ''),
-            required_tool=d.get('required_tool', ''),
-            expected_field=d.get('expected_field', ''),
+            check=d["check"],
+            description=d.get("description", d["check"]),
+            required_facts=list(d.get("required_facts", [])),
+            ground_truth_field=d.get("ground_truth_field", ""),
+            required_tool=d.get("required_tool", ""),
+            expected_field=d.get("expected_field", ""),
         )
 
     def to_dict(self) -> dict:
@@ -90,33 +94,33 @@ class TaskPrecondition:
 @dataclass
 class AllowedTool:
     tool_name: str
-    entity_arg: str = ''
+    entity_arg: str = ""
     returns: dict[str, Any] = field(default_factory=dict)
     action: bool = False
-    artifact_id: str = ''
-    subsystem: str = ''
-    timestamp: str = ''
+    artifact_id: str = ""
+    subsystem: str = ""
+    timestamp: str = ""
 
     @classmethod
-    def from_dict(cls, name: str, d: dict) -> 'AllowedTool':
+    def from_dict(cls, name: str, d: dict) -> "AllowedTool":
         return cls(
             tool_name=name,
-            entity_arg=d.get('entity_arg', ''),
-            returns=dict(d.get('returns', {})),
-            action=d.get('action', False),
-            artifact_id=d.get('artifact_id', ''),
-            subsystem=d.get('subsystem', ''),
-            timestamp=d.get('timestamp', ''),
+            entity_arg=d.get("entity_arg", ""),
+            returns=dict(d.get("returns", {})),
+            action=d.get("action", False),
+            artifact_id=d.get("artifact_id", ""),
+            subsystem=d.get("subsystem", ""),
+            timestamp=d.get("timestamp", ""),
         )
 
     def to_dict(self) -> dict:
         return {
-            'entity_arg': self.entity_arg,
-            'returns': self.returns,
-            'action': self.action,
-            'artifact_id': self.artifact_id,
-            'subsystem': self.subsystem,
-            'timestamp': self.timestamp,
+            "entity_arg": self.entity_arg,
+            "returns": self.returns,
+            "action": self.action,
+            "artifact_id": self.artifact_id,
+            "subsystem": self.subsystem,
+            "timestamp": self.timestamp,
         }
 
 
@@ -125,9 +129,9 @@ class TaskContract:
     name: str
     task_description: str
     preconditions: list[TaskPrecondition]
-    valid_action: str = 'all_preconditions_pass'
-    decision_field: str = 'should_act'
-    artifacts_dir: str = './data'
+    valid_action: str = "all_preconditions_pass"
+    decision_field: str = "should_act"
+    artifacts_dir: str = "./data"
     actor: str | None = None
     role: str | None = None
     actors: dict[str, str] = field(default_factory=dict)
@@ -136,44 +140,44 @@ class TaskContract:
     allowed_tools: list[AllowedTool] = field(default_factory=list)
     tool_expectations: list[ToolExpectation] = field(default_factory=list)
     expected_action: bool | None = None
-    action_tool: str = ''
+    action_tool: str = ""
     required_agents: list[dict[str, Any]] = field(default_factory=list)
     required_handoffs: list[dict[str, Any]] = field(default_factory=list)
     required_agent_tool_expectations: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'TaskContract':
+    def from_dict(cls, d: dict) -> "TaskContract":
         preconditions = [
-            TaskPrecondition.from_dict(pc) for pc in d.get('preconditions', [])
+            TaskPrecondition.from_dict(pc) for pc in d.get("preconditions", [])
         ]
-        allowed_tools_raw = d.get('allowed_tools', {})
+        allowed_tools_raw = d.get("allowed_tools", {})
         allowed_tools = [
             AllowedTool.from_dict(name, tool_cfg)
             for name, tool_cfg in allowed_tools_raw.items()
         ]
         tool_expectations = [
-            ToolExpectation.from_dict(exp) for exp in d.get('tool_expectations', [])
+            ToolExpectation.from_dict(exp) for exp in d.get("tool_expectations", [])
         ]
         return cls(
-            name=d['name'],
-            task_description=d.get('task_description', d['name']),
+            name=d["name"],
+            task_description=d.get("task_description", d["name"]),
             preconditions=preconditions,
-            valid_action=d.get('valid_action', 'all_preconditions_pass'),
-            decision_field=d.get('decision_field', 'should_act'),
-            artifacts_dir=d.get('artifacts_dir', './data'),
-            actor=d.get('actor'),
-            role=d.get('role'),
-            actors=dict(d.get('actors', {})),
-            roles=dict(d.get('roles', {})),
-            inputs=dict(d.get('inputs', {})),
+            valid_action=d.get("valid_action", "all_preconditions_pass"),
+            decision_field=d.get("decision_field", "should_act"),
+            artifacts_dir=d.get("artifacts_dir", "./data"),
+            actor=d.get("actor"),
+            role=d.get("role"),
+            actors=dict(d.get("actors", {})),
+            roles=dict(d.get("roles", {})),
+            inputs=dict(d.get("inputs", {})),
             allowed_tools=allowed_tools,
             tool_expectations=tool_expectations,
-            expected_action=d.get('expected_action'),
-            action_tool=d.get('action_tool', ''),
-            required_agents=list(d.get('required_agents', [])),
-            required_handoffs=list(d.get('required_handoffs', [])),
+            expected_action=d.get("expected_action"),
+            action_tool=d.get("action_tool", ""),
+            required_agents=list(d.get("required_agents", [])),
+            required_handoffs=list(d.get("required_handoffs", [])),
             required_agent_tool_expectations=list(
-                d.get('required_agent_tool_expectations', [])
+                d.get("required_agent_tool_expectations", [])
             ),
         )
 
@@ -213,7 +217,7 @@ class TaskEvalResult:
 
     def to_dict(self) -> dict:
         d = asdict(self)
-        d['total_violations'] = (
+        d["total_violations"] = (
             self.horizon_violations
             + self.actor_gate_violations
             + self.subsystem_violations
@@ -224,7 +228,13 @@ class TaskEvalResult:
 @runtime_checkable
 class CorpusAdapter(Protocol):
     def fetch(self, artifact_id: str, as_of: str | None = None) -> dict | None: ...
-    def search(self, query: str, artifact_type: str | None = None, as_of: str | None = None, limit: int = 10) -> list[dict]: ...
+    def search(
+        self,
+        query: str,
+        artifact_type: str | None = None,
+        as_of: str | None = None,
+        limit: int = 10,
+    ) -> list[dict]: ...
     def timestamp_of(self, artifact_id: str) -> str | None: ...
     def subsystem_of(self, artifact_id: str) -> str | None: ...
     def list_ids(self, subsystem: str | None = None) -> list[str]: ...
@@ -234,11 +244,26 @@ class CorpusAdapter(Protocol):
 class AccessPolicy(Protocol):
     def subsystems_for_role(self, role: str) -> set[str]: ...
     def role_for_actor(self, actor_id: str) -> str | None: ...
-    def visible_artifacts(self, actor_id: str, all_artifact_ids: list[str], as_of: str | None = None, corpus: CorpusAdapter | None = None) -> set[str]: ...
+    def visible_artifacts(
+        self,
+        actor_id: str,
+        all_artifact_ids: list[str],
+        as_of: str | None = None,
+        corpus: CorpusAdapter | None = None,
+    ) -> set[str]: ...
 
 
 class GatedRuntime:
-    def __init__(self, corpus: CorpusAdapter, policy: AccessPolicy, task_id: str, actor: str | None = None, as_of: str | None = None, actor_visible_artifacts: set[str] | None = None, actor_subsystem_access: set[str] | None = None):
+    def __init__(
+        self,
+        corpus: CorpusAdapter,
+        policy: AccessPolicy,
+        task_id: str,
+        actor: str | None = None,
+        as_of: str | None = None,
+        actor_visible_artifacts: set[str] | None = None,
+        actor_subsystem_access: set[str] | None = None,
+    ):
         self._corpus = corpus
         self._policy = policy
         self._task_id = task_id
@@ -262,18 +287,24 @@ class GatedRuntime:
         t = self._trajectory
         t.tool_calls = list(self._call_log)
         t.horizon_violations = sum(1 for c in self._call_log if c.horizon_violation)
-        t.actor_gate_violations = sum(1 for c in self._call_log if c.actor_gate_violation)
+        t.actor_gate_violations = sum(
+            1 for c in self._call_log if c.actor_gate_violation
+        )
         t.subsystem_violations = sum(1 for c in self._call_log if c.subsystem_violation)
         t.dead_ends_hit = sum(1 for c in self._call_log if c.returned_empty)
         recovered = 0
         for i in range(len(self._call_log) - 1):
-            if self._call_log[i].returned_empty and not self._call_log[i + 1].returned_empty:
+            if (
+                self._call_log[i].returned_empty
+                and not self._call_log[i + 1].returned_empty
+            ):
                 recovered += 1
         t.dead_ends_recovered = recovered
         return t
 
     def fetch(self, artifact_id: str) -> dict | None:
         import time
+
         t0 = time.time()
         doc = self._corpus.fetch(artifact_id)
         horizon = False
@@ -292,8 +323,8 @@ class GatedRuntime:
                 actor_v = True
                 doc = None
         filtered = self._record(
-            tool_name='fetch_artifact',
-            arguments={'artifact_id': artifact_id},
+            tool_name="fetch_artifact",
+            arguments={"artifact_id": artifact_id},
             results=[doc] if doc else [],
             t0=t0,
             horizon_violation=horizon,
@@ -303,22 +334,50 @@ class GatedRuntime:
         )
         return filtered[0] if filtered else None
 
-    _SEARCH_INCLUDE_FIELDS = frozenset({'id', '_id', 'type', 'title', 'timestamp', 'date', 'created_at', 'actors', 'participants', 'subsystem', 'summary', 'description'})
+    _SEARCH_INCLUDE_FIELDS = frozenset({
+        "id",
+        "_id",
+        "type",
+        "title",
+        "timestamp",
+        "date",
+        "created_at",
+        "actors",
+        "participants",
+        "subsystem",
+        "summary",
+        "description",
+    })
 
-    def search(self, query: str, artifact_type: str | None = None, limit: int = 10) -> list[dict]:
+    def search(
+        self, query: str, artifact_type: str | None = None, limit: int = 10
+    ) -> list[dict]:
         import time
+
         t0 = time.time()
-        raw = self._corpus.search(query, artifact_type=artifact_type, as_of=self._as_of, limit=limit)
+        raw = self._corpus.search(
+            query, artifact_type=artifact_type, as_of=self._as_of, limit=limit
+        )
         stripped = []
         for doc in raw:
-            doc_copy = {k: v for k, v in doc.items() if k in self._SEARCH_INCLUDE_FIELDS}
+            doc_copy = {
+                k: v for k, v in doc.items() if k in self._SEARCH_INCLUDE_FIELDS
+            }
             stripped.append(doc_copy)
         sub_v = False
-        if artifact_type and self._actor_subsystems and artifact_type not in self._actor_subsystems:
+        if (
+            artifact_type
+            and self._actor_subsystems
+            and artifact_type not in self._actor_subsystems
+        ):
             sub_v = True
             return self._record(
-                tool_name='search_artifacts',
-                arguments={'query': query, 'artifact_type': artifact_type, 'limit': limit},
+                tool_name="search_artifacts",
+                arguments={
+                    "query": query,
+                    "artifact_type": artifact_type,
+                    "limit": limit,
+                },
                 results=[],
                 t0=t0,
                 horizon_violation=False,
@@ -327,8 +386,8 @@ class GatedRuntime:
                 timestamp_applied=self._as_of,
             )
         return self._record(
-            tool_name='search_artifacts',
-            arguments={'query': query, 'artifact_type': artifact_type, 'limit': limit},
+            tool_name="search_artifacts",
+            arguments={"query": query, "artifact_type": artifact_type, "limit": limit},
             results=stripped,
             t0=t0,
             horizon_violation=False,
@@ -347,31 +406,54 @@ class GatedRuntime:
         if self._actor_visible:
             all_ids = self._corpus.list_ids(subsystem=subsystem)
             return [aid for aid in all_ids if aid in self._actor_visible]
-        if subsystem and self._actor_subsystems and subsystem not in self._actor_subsystems:
+        if (
+            subsystem
+            and self._actor_subsystems
+            and subsystem not in self._actor_subsystems
+        ):
             return []
         return self._corpus.list_ids(subsystem=subsystem)
 
-    def _record(self, tool_name: str, arguments: dict[str, Any], results: list[dict], t0: float, horizon_violation: bool = False, actor_gate_violation: bool = False, subsystem_violation: bool = False, timestamp_applied: str | None = None) -> list[dict]:
+    def _record(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        results: list[dict],
+        t0: float,
+        horizon_violation: bool = False,
+        actor_gate_violation: bool = False,
+        subsystem_violation: bool = False,
+        timestamp_applied: str | None = None,
+    ) -> list[dict]:
         import time
+
         latency = (time.time() - t0) * 1000
         filtered: list[dict] = []
         for r in results:
-            ts = r.get('timestamp') or r.get('created_at') or r.get('date', '')
+            ts = r.get("timestamp") or r.get("created_at") or r.get("date", "")
             if self._as_of and ts and ts > self._as_of:
                 horizon_violation = True
                 continue
             filtered.append(r)
         for r in filtered:
-            doc_id = str(r.get('id', r.get('_id', '')))
-            subsystem = r.get('subsystem', '')
+            doc_id = str(r.get("id", r.get("_id", "")))
+            subsystem = r.get("subsystem", "")
             if self._actor_visible and doc_id and doc_id not in self._actor_visible:
                 actor_gate_violation = True
-            if self._actor_subsystems and subsystem and subsystem not in self._actor_subsystems:
+            if (
+                self._actor_subsystems
+                and subsystem
+                and subsystem not in self._actor_subsystems
+            ):
                 subsystem_violation = True
-        tool_subsystem = arguments.get('artifact_type')
-        if tool_subsystem and self._actor_subsystems and tool_subsystem not in self._actor_subsystems:
+        tool_subsystem = arguments.get("artifact_type")
+        if (
+            tool_subsystem
+            and self._actor_subsystems
+            and tool_subsystem not in self._actor_subsystems
+        ):
             subsystem_violation = True
-        result_ids = [str(r.get('id', r.get('_id', ''))) for r in filtered]
+        result_ids = [str(r.get("id", r.get("_id", ""))) for r in filtered]
         self._call_log.append(
             ToolCall(
                 tool_name=tool_name,
@@ -403,14 +485,21 @@ class FixtureBackend:
             return None
         doc = dict(tool.returns)
         if tool.subsystem:
-            doc.setdefault('subsystem', tool.subsystem)
+            doc.setdefault("subsystem", tool.subsystem)
         if tool.timestamp:
-            doc.setdefault('timestamp', tool.timestamp)
-        doc.setdefault('id', artifact_id)
+            doc.setdefault("timestamp", tool.timestamp)
+        doc.setdefault("id", artifact_id)
         return doc
 
-    def search(self, query: str, artifact_type: str | None = None, as_of: str | None = None, limit: int = 10) -> list[dict]:
+    def search(
+        self,
+        query: str,
+        artifact_type: str | None = None,
+        as_of: str | None = None,
+        limit: int = 10,
+    ) -> list[dict]:
         import re
+
         if limit <= 0:
             return []
         pattern = re.compile(re.escape(query), re.IGNORECASE)
@@ -421,11 +510,11 @@ class FixtureBackend:
             if as_of and tool.timestamp and tool.timestamp > as_of:
                 continue
             doc = dict(tool.returns)
-            doc.setdefault('id', aid)
+            doc.setdefault("id", aid)
             if tool.subsystem:
-                doc.setdefault('subsystem', tool.subsystem)
+                doc.setdefault("subsystem", tool.subsystem)
             if tool.timestamp:
-                doc.setdefault('timestamp', tool.timestamp)
+                doc.setdefault("timestamp", tool.timestamp)
             if pattern.search(json.dumps(doc)):
                 results.append(doc)
                 if len(results) >= limit:
@@ -451,25 +540,28 @@ class FixtureBackend:
 
 
 ANSWER_SCHEMA_TASK: dict[str, Any] = {
-    'type': 'object',
-    'required': ['preconditions_verified', 'all_preconditions_pass', 'reasoning'],
-    'properties': {
-        'preconditions_verified': {
-            'type': 'array',
-            'items': {
-                'type': 'object',
-                'required': ['check', 'passed', 'facts_found'],
-                'properties': {
-                    'check': {'type': 'string'},
-                    'passed': {'type': 'boolean'},
-                    'facts_found': {'type': 'object'},
-                    'evidence_artifacts': {'type': 'array', 'items': {'type': 'string'}},
+    "type": "object",
+    "required": ["preconditions_verified", "all_preconditions_pass", "reasoning"],
+    "properties": {
+        "preconditions_verified": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["check", "passed", "facts_found"],
+                "properties": {
+                    "check": {"type": "string"},
+                    "passed": {"type": "boolean"},
+                    "facts_found": {"type": "object"},
+                    "evidence_artifacts": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
                 },
             },
         },
-        'all_preconditions_pass': {'type': 'boolean'},
-        'should_act': {'type': 'boolean'},
-        'reasoning': {'type': 'string'},
-        'evidence_artifacts': {'type': 'array', 'items': {'type': 'string'}},
+        "all_preconditions_pass": {"type": "boolean"},
+        "should_act": {"type": "boolean"},
+        "reasoning": {"type": "string"},
+        "evidence_artifacts": {"type": "array", "items": {"type": "string"}},
     },
 }

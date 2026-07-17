@@ -8,10 +8,12 @@ import sys
 import time
 import traceback
 import uuid
-from typing import Any
+from collections.abc import AsyncIterator, Iterator
+from typing import Any, cast
 
 from ..observe import AgentObserver, ObservedToolCall, RecordingRuntime
 from .framework_observation import (
+    ObservedAgent,
     ObservedError,
     ObservedEvent,
     ObservedHandoff,
@@ -189,7 +191,9 @@ class _GroundEvalLangChainCallbackHandler:
                 "tags": tags or [],
             },
         )
-        self.collector.note_node_end(node_name=node_name, return_value=_jsonish(outputs))
+        self.collector.note_node_end(
+            node_name=node_name, return_value=_jsonish(outputs)
+        )
 
     def on_chain_error(
         self,
@@ -354,7 +358,9 @@ class _GroundEvalLangChainCallbackHandler:
             or serialized.get("lc")
             or "tool"
         )
-        parsed_inputs = inputs if isinstance(inputs, dict) else _parse_jsonish(input_str)
+        parsed_inputs = (
+            inputs if isinstance(inputs, dict) else _parse_jsonish(input_str)
+        )
         if not isinstance(parsed_inputs, dict):
             parsed_inputs = {"input": parsed_inputs}
         self.collector.start_child_operation(
@@ -591,6 +597,9 @@ class _LangGraphEventCollector:
         self.model_events: list[ObservedModelEvent] = []
         self.errors: list[ObservedError] = []
         self.static_handoffs: list[ObservedHandoff] = []
+        self.dynamic_handoffs: list[ObservedHandoff] = []
+        self._last_runtime_node_by_branch: dict[str, str] = {}
+        self._runtime_handoff_keys: set[tuple[str, str, str]] = set()
         self.static_nodes: set[str] = set()
         self.static_graph_available = False
         self.subgraph_introspection_available = False
@@ -853,7 +862,11 @@ class _LangGraphEventCollector:
         resolved_node_name = node_name or op["node_name"]
         branch_id = self.node_state.get(resolved_node_name or "", {}).get("branch_id")
         agent_name = resolved_node_name
-        agent_id = f"langgraph:{branch_id or resolved_node_name}" if resolved_node_name else None
+        agent_id = (
+            f"langgraph:{branch_id or resolved_node_name}"
+            if resolved_node_name
+            else None
+        )
         observed_call = ObservedToolCall(
             tool_name=str(op["tool_name"]),
             arguments=dict(op["arguments"]),
@@ -868,9 +881,9 @@ class _LangGraphEventCollector:
         )
         self.tool_calls.append(observed_call)
         if observed_call.node_name:
-            self.child_tool_calls_by_node.setdefault(observed_call.node_name, []).append(
-                observed_call
-            )
+            self.child_tool_calls_by_node.setdefault(
+                observed_call.node_name, []
+            ).append(observed_call)
         if observed_call.node_name:
             self.note_node_end(
                 node_name=observed_call.node_name,
@@ -955,64 +968,103 @@ class _LangGraphEventCollector:
             )
         )
 
+    def record_runtime_transition(
+        self,
+        *,
+        node_name: str | None,
+        branch_id: str | None,
+        timestamp: str,
+    ) -> None:
+        if not node_name or node_name in {"__start__", "__end__"}:
+            return
+
+        branch_key = branch_id or "__root__"
+        previous = self._last_runtime_node_by_branch.get(branch_key)
+        self._last_runtime_node_by_branch[branch_key] = node_name
+
+        if not previous or previous == node_name:
+            return
+
+        static_pairs = {
+            (handoff.from_executor_id, handoff.to_executor_id)
+            for handoff in self.static_handoffs
+        }
+        if static_pairs and (previous, node_name) not in static_pairs:
+            return
+
+        key = (branch_key, previous, node_name)
+        if key in self._runtime_handoff_keys:
+            return
+
+        self._runtime_handoff_keys.add(key)
+        self.dynamic_handoffs.append(
+            ObservedHandoff(
+                from_executor_id=previous,
+                to_executor_id=node_name,
+                timestamp=timestamp,
+                payload_type="langgraph.runtime_transition",
+            )
+        )
+
     def process_stream_chunk(self, chunk: Any) -> None:
         timestamp = _now_str()
         self.stream_event_count += 1
 
         if isinstance(chunk, dict) and "type" in chunk:
             mode = str(chunk.get("type"))
-            ns = chunk.get("ns") or ()
-            branch_id = "/".join(str(x) for x in ns) if ns else None
-            node_name = _extract_node_name_from_ns(ns)
+            namespace = chunk.get("ns") or ()
+            branch_id = "/".join(str(item) for item in namespace) if namespace else None
+            node_name = _extract_node_name_from_ns(namespace)
             data = _jsonish(chunk.get("data"))
-            if branch_id:
-                self.distinct_branch_ids.add(branch_id)
-            self.record_event(
-                event_type=f"langgraph.stream.{mode}",
-                timestamp=timestamp,
-                node_name=node_name,
-                branch_id=branch_id,
-                parent_event_id=None,
-                payload={"data": data},
-            )
-            self._extract_node_data_from_stream(
+            self._process_normalized_stream_chunk(
                 mode=mode,
                 data=data,
                 node_name=node_name,
                 branch_id=branch_id,
+                timestamp=timestamp,
             )
-            if mode == "values" and isinstance(data, dict):
-                self.final_output_from_values = data
-                self.final_output_from_last_dict = data
-            elif isinstance(data, dict):
-                self.final_output_from_last_dict = data
+            return
+
+        if isinstance(chunk, tuple) and len(chunk) == 3:
+            namespace, mode, data = chunk
+            branch_id = (
+                "/".join(str(item) for item in namespace)
+                if isinstance(namespace, (list, tuple)) and namespace
+                else str(namespace)
+                if namespace
+                else None
+            )
+            node_name = _extract_node_name_from_ns(namespace)
+            self._process_normalized_stream_chunk(
+                mode=str(mode),
+                data=_jsonish(data),
+                node_name=node_name,
+                branch_id=branch_id,
+                timestamp=timestamp,
+            )
             return
 
         if isinstance(chunk, tuple) and len(chunk) == 2:
-            mode, data = chunk
-            mode = str(mode)
-            data = _jsonish(data)
-            node_name = None
-            branch_id = None
-            self.record_event(
-                event_type=f"langgraph.stream.{mode}",
-                timestamp=timestamp,
-                node_name=node_name,
-                branch_id=branch_id,
-                parent_event_id=None,
-                payload={"data": data},
-            )
-            self._extract_node_data_from_stream(
+            first, data = chunk
+            if isinstance(first, (list, tuple)):
+                namespace = first
+                branch_id = (
+                    "/".join(str(item) for item in namespace) if namespace else None
+                )
+                node_name = _extract_node_name_from_ns(namespace)
+                mode = "updates"
+            else:
+                branch_id = None
+                node_name = None
+                mode = str(first)
+
+            self._process_normalized_stream_chunk(
                 mode=mode,
-                data=data,
+                data=_jsonish(data),
                 node_name=node_name,
                 branch_id=branch_id,
+                timestamp=timestamp,
             )
-            if mode == "values" and isinstance(data, dict):
-                self.final_output_from_values = data
-                self.final_output_from_last_dict = data
-            elif isinstance(data, dict):
-                self.final_output_from_last_dict = data
             return
 
         self.record_event(
@@ -1023,6 +1075,60 @@ class _LangGraphEventCollector:
             parent_event_id=None,
             payload={"raw": _jsonish(chunk)},
         )
+
+    def _process_normalized_stream_chunk(
+        self,
+        *,
+        mode: str,
+        data: Any,
+        node_name: str | None,
+        branch_id: str | None,
+        timestamp: str,
+    ) -> None:
+        if branch_id:
+            self.distinct_branch_ids.add(branch_id)
+
+        self.record_event(
+            event_type=f"langgraph.stream.{mode}",
+            timestamp=timestamp,
+            node_name=node_name,
+            branch_id=branch_id,
+            parent_event_id=None,
+            payload={"data": data},
+        )
+        self._extract_node_data_from_stream(
+            mode=mode,
+            data=data,
+            node_name=node_name,
+            branch_id=branch_id,
+        )
+
+        if mode == "updates" and isinstance(data, dict) and len(data) == 1:
+            executed_node = str(next(iter(data)))
+            self.record_runtime_transition(
+                node_name=executed_node,
+                branch_id=branch_id,
+                timestamp=timestamp,
+            )
+        elif mode == "debug" and isinstance(data, dict):
+            executed_node = (
+                data.get("name")
+                or data.get("node")
+                or data.get("task")
+                or data.get("task_name")
+                or node_name
+            )
+            self.record_runtime_transition(
+                node_name=str(executed_node) if executed_node else None,
+                branch_id=branch_id,
+                timestamp=timestamp,
+            )
+
+        if mode == "values" and isinstance(data, dict):
+            self.final_output_from_values = data
+            self.final_output_from_last_dict = data
+        elif isinstance(data, dict):
+            self.final_output_from_last_dict = data
 
     def _extract_node_data_from_stream(
         self,
@@ -1066,7 +1172,9 @@ class _LangGraphEventCollector:
             self.note_node_from_stream(
                 node_name=str(candidate_node) if candidate_node else None,
                 branch_id=branch_id,
-                arguments=_jsonish(candidate_input) if candidate_input is not None else None,
+                arguments=_jsonish(candidate_input)
+                if candidate_input is not None
+                else None,
                 return_value=_jsonish(candidate_output)
                 if candidate_output is not None
                 else None,
@@ -1123,14 +1231,16 @@ class _LangGraphEventCollector:
                 agent_name=node_name if node_name in self.node_state else None,
             )
 
+        all_handoffs = self.static_handoffs + self.dynamic_handoffs
+
         return ObservedWorkflow(
             workflow_id=self.run_id,
             workflow_name="LangGraph workflow trace",
             workflow_description=None,
             node_count=len(self.workflow_nodes),
             nodes=list(self.workflow_nodes.values()),
-            handoff_count=len(self.static_handoffs),
-            handoffs=self.static_handoffs,
+            handoff_count=len(all_handoffs),
+            handoffs=all_handoffs,
             branch_count=len(self.distinct_branch_ids),
         )
 
@@ -1158,21 +1268,33 @@ class _LangGraphEventCollector:
             },
         }
 
+        max_steps = getattr(agent, "_groundeval_max_steps", None)
+        if isinstance(max_steps, int) and max_steps > 0:
+            config["recursion_limit"] = max_steps
+
         if hasattr(agent, "astream") and callable(agent.astream):
-            async for chunk in agent.astream(
-                inputs,
-                config=config,
-                stream_mode=["values", "updates", "debug"],
-                subgraphs=True,
-            ):
+            async_stream = cast(
+                AsyncIterator[Any],
+                agent.astream(
+                    inputs,
+                    config=config,
+                    stream_mode=["values", "updates", "debug"],
+                    subgraphs=True,
+                ),
+            )
+            async for chunk in async_stream:
                 self.process_stream_chunk(chunk)
         elif hasattr(agent, "stream") and callable(agent.stream):
-            for chunk in agent.stream(
-                inputs,
-                config=config,
-                stream_mode=["values", "updates", "debug"],
-                subgraphs=True,
-            ):
+            sync_stream = cast(
+                Iterator[Any],
+                agent.stream(
+                    inputs,
+                    config=config,
+                    stream_mode=["values", "updates", "debug"],
+                    subgraphs=True,
+                ),
+            )
+            for chunk in sync_stream:
                 self.process_stream_chunk(chunk)
         else:
             raise TypeError(
@@ -1215,7 +1337,8 @@ class _LangGraphEventCollector:
             "tool_calls": bool(self.tool_calls),
             "agent_turns": bool(self.workflow_nodes),
             "workflow_nodes": bool(self.workflow_nodes),
-            "handoffs": bool(self.static_handoffs),
+            "handoffs": bool(self.dynamic_handoffs),
+            "static_graph_edges": bool(self.static_handoffs),
             "approvals": False,
             "checkpoints": False,
             "context_injection": False,
@@ -1241,12 +1364,14 @@ class _LangGraphEventCollector:
             tool_calls=self.tool_calls,
             events=self.events,
             agents=[
-                {
-                    "agent_id": f"langgraph:{node.node_id}",
-                    "agent_name": node.node_id,
-                    "role": node.node_id,
-                    "tool_call_count": sum(1 for tc in self.tool_calls if tc.agent_name == node.node_id),
-                }
+                ObservedAgent(
+                    agent_id=f"langgraph:{node.node_id}",
+                    agent_name=node.node_id,
+                    role=node.node_id,
+                    tool_call_count=sum(
+                        1 for tc in self.tool_calls if tc.agent_name == node.node_id
+                    ),
+                )
                 for node in self.workflow_nodes.values()
                 if node.agent_name
             ],
@@ -1306,7 +1431,9 @@ class LangGraphObserver(AgentObserver):
                     )
 
     def set_max_steps(self, agent: Any, max_steps: int) -> None:
-        agent._groundeval_max_steps = max_steps
+        if max_steps <= 0:
+            raise ValueError("LangGraph max_steps must be greater than zero.")
+        agent._groundeval_max_steps = int(max_steps)
 
 
 def generate_langgraph_report(run: RichObservedRun) -> str:

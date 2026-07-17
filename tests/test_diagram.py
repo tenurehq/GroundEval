@@ -2,7 +2,6 @@ import json
 
 
 import pytest
-from reportlab.pdfgen import canvas as rl_canvas
 
 from groundeval.diagram import (
     _build_lanes_and_steps,

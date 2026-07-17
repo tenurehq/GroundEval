@@ -750,15 +750,43 @@ class MafObserver(AgentObserver):
                     )
 
     def set_max_steps(self, agent: Any, max_steps: int) -> None:
-        return None
+        if max_steps <= 0:
+            raise ValueError("MAF max_steps must be greater than zero.")
 
+        configured = False
+        targets = [
+            agent,
+            getattr(agent, "options", None),
+            getattr(agent, "config", None),
+            getattr(agent, "settings", None),
+        ]
 
-def _build_maf_eval_agent_fn(agent_class_path: str):
-    raise RuntimeError(
-        "MAF framework agents are evaluated through observe --score, not through "
-        "the task/GatedRuntime path. Run: groundeval observe --framework maf "
-        "--agent-class <path> --config <reviewed config.yaml> --score"
-    )
+        for target in targets:
+            if target is None:
+                continue
+
+            if isinstance(target, dict):
+                for key in ("max_steps", "max_iterations", "max_turns"):
+                    if key in target:
+                        target[key] = int(max_steps)
+                        configured = True
+                continue
+
+            for attribute in ("max_steps", "max_iterations", "max_turns"):
+                if hasattr(target, attribute):
+                    try:
+                        setattr(target, attribute, int(max_steps))
+                        configured = True
+                    except Exception:
+                        pass
+
+        agent._groundeval_max_steps = int(max_steps)
+
+        if not configured:
+            logger.warning(
+                "The MAF entry object exposes no recognized native step-limit "
+                "setting. max_steps cannot be enforced portably for this object."
+            )
 
 
 def generate_maf_report(maf_run: MafObservedRun) -> str:

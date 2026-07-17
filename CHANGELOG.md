@@ -6,6 +6,42 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.04]
+
+### Added
+
+- **OpenAI Agents SDK support**: Added OpenAI Agents SDK to the framework support matrix, observer auto-registration, framework-specific reporting, CLI guidance, and optional dependency groups.
+- **Framework registry and normalization**: Added centralized framework adapter detection and name normalization for configuration validation and CLI routing.
+- **Deterministic multi-agent scoring**: Added scoring for required agents, runtime handoffs, and agent-specific tool expectations, including argument and return-value matching.
+- **Expanded observed trajectory metadata**: Added observed agents, observed handoffs, per-call agent IDs, and observed tool return values to framework trajectories.
+- **LangGraph runtime handoff capture**: Added branch-scoped detection of runtime node transitions while preserving static graph edges separately.
+- **LangGraph stream shape support**: Added support for dictionary, two-item tuple, and namespace-aware three-item tuple stream events.
+- **LangGraph recursion limits**: Added `max_steps` enforcement through LangGraph's `recursion_limit` configuration for synchronous and asynchronous streams.
+- **MAF step-limit configuration**: Added best-effort `max_steps`, `max_iterations`, and `max_turns` configuration across common MAF entry-object settings.
+- **Expanded adapter tests**: Added coverage for LangGraph stream formats, runtime handoffs, branch behavior, recursion limits, agent serialization, and invalid step limits.
+
+### Changed
+
+- **Framework detection behavior**: Replaced hard-coded framework lists with the shared adapter registry across config validation and task routing.
+- **Framework config validation**: Updated agent-class requirements, observe scoring behavior, and multi-agent compatibility checks to recognize all registered framework adapters.
+- **Framework-native overall scoring**: Changed framework scoring so the base Counterfactual, Silence, and Perspective score is multiplied by the multi-agent requirement score.
+- **Framework correctness criteria**: Changed framework runs to count as correct only when answer checks pass and every configured multi-agent requirement is satisfied.
+- **LangGraph handoff capabilities**: Changed the `handoffs` capability to represent observed runtime transitions, with static graph edges exposed separately.
+- **LangGraph agent serialization**: Changed normalized LangGraph agents to use `ObservedAgent` objects for consistent serialization and deserialization.
+- **Observed final-answer parsing**: Changed framework observation handling to parse structured JSON final outputs before scoring when possible.
+- **Tool-return scoring**: Changed framework scoring to use observed normalized return values carried into each trajectory tool call.
+- **CLI framework guidance**: Updated the `observe --framework` help text to include CrewAI, MAF, LangGraph, and OpenAI Agents SDK.
+- **MAF task-path behavior**: Consolidated framework routing through the generic observe-and-score path rather than maintaining a dedicated MAF evaluation stub.
+- **Lint configuration**: Added Ruff `E501` suppression while retaining the configured maximum line length.
+- **Code formatting**: Applied consistent formatting and quoting across configuration, runtime, scoring, CLI, and adapter modules.
+
+### Removed
+
+- **Legacy MAF evaluation stub**: Removed `_build_maf_eval_agent_fn`, which previously raised an error directing MAF users to `observe --score`.
+- **Obsolete adapter tests and imports**: Removed tests and unused imports tied to the deleted MAF stub, older LangGraph workflow behavior, and unused test dependencies.
+
+---
+
 ## [v0.03]
 
 ### Added

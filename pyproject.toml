@@ -29,6 +29,7 @@ dev = [
 ]
 crewai = ["crewai>=1.14.7"]
 maf = ["agent-framework"]
+openai-agents = ["openai-agents"]
 
 [tool.setuptools_scm]
 
@@ -45,6 +46,7 @@ format.preview = true
 
 [tool.ruff.lint]
 select = ["E", "F", "B"]
+ignore = ["E501"]
 
 [tool.ruff.lint.pycodestyle]
 max-line-length = 150

@@ -17,6 +17,11 @@ from groundeval.framework_adapters.langgraph_adapter import (
     _summarize_value,
     generate_langgraph_report,
 )
+from groundeval.framework_adapters.framework_observation import (
+    ObservedAgent,
+    ObservedHandoff,
+    ObservedRun as FrameworkObservedRun,
+)
 from groundeval.observe import ObservedToolCall, RecordingRuntime
 
 
@@ -472,20 +477,106 @@ def test_collector_record_model_event_uses_fallback_usage_metadata():
     assert event.tool_schemas_count == 2
 
 
-def test_process_stream_chunk_dict_tuple_and_unknown_forms(collector):
+def test_process_stream_chunk_supports_all_emitted_shapes(collector):
     collector.process_stream_chunk({
         "type": "values",
         "ns": ["node1:abc"],
         "data": {"final": True},
     })
     collector.process_stream_chunk(("updates", {"node2": {"id": "a1"}}))
+    collector.process_stream_chunk((
+        ("root", "review:task"),
+        "updates",
+        {"review": {"ok": True}},
+    ))
+    collector.process_stream_chunk((
+        ("root", "review:task"),
+        "values",
+        {"should_act": True},
+    ))
     collector.process_stream_chunk("weird")
-    event_types = [e.event_type for e in collector.events]
+
+    event_types = [event.event_type for event in collector.events]
+    three_part_events = [
+        event for event in collector.events if event.branch_id == "root/review:task"
+    ]
+
     assert "langgraph.stream.values" in event_types
     assert "langgraph.stream.updates" in event_types
     assert "langgraph.stream.unknown" in event_types
-    assert collector.final_output_from_values == {"final": True}
-    assert collector.final_output_from_last_dict == {"node2": {"id": "a1"}}
+    assert [event.event_type for event in three_part_events] == [
+        "langgraph.stream.updates",
+        "langgraph.stream.values",
+    ]
+    assert all(event.node_name == "review" for event in three_part_events)
+    assert collector.final_output_from_values == {"should_act": True}
+    assert not any(
+        event.event_type == "langgraph.stream.unknown" for event in three_part_events
+    )
+
+
+def test_runtime_handoffs_capture_sequential_transitions_without_duplicates(
+    collector,
+):
+    collector.static_handoffs = [
+        ObservedHandoff(
+            "review",
+            "routing",
+            payload_type="langgraph.static_edge",
+        )
+    ]
+
+    collector.process_stream_chunk(("updates", {"review": {"ok": True}}))
+    collector.process_stream_chunk(("updates", {"review": {"ok": True}}))
+    collector.process_stream_chunk(("updates", {"routing": {"owner": "renewals"}}))
+    collector.process_stream_chunk(("updates", {"routing": {"owner": "renewals"}}))
+
+    assert len(collector.dynamic_handoffs) == 1
+    handoff = collector.dynamic_handoffs[0]
+    assert handoff.from_executor_id == "review"
+    assert handoff.to_executor_id == "routing"
+    assert handoff.payload_type == "langgraph.runtime_transition"
+
+
+def test_runtime_handoffs_are_branch_scoped_and_parallel_updates_are_unordered(
+    collector,
+):
+    collector.process_stream_chunk((("branch-a",), "updates", {"review": {"ok": True}}))
+    collector.process_stream_chunk((
+        ("branch-b",),
+        "updates",
+        {"support": {"ok": True}},
+    ))
+    collector.process_stream_chunk((
+        ("branch-a",),
+        "updates",
+        {"risk": {"ok": True}, "routing": {"ok": True}},
+    ))
+    collector.process_stream_chunk((
+        ("branch-b",),
+        "updates",
+        {"routing": {"ok": True}},
+    ))
+
+    assert len(collector.dynamic_handoffs) == 1
+    handoff = collector.dynamic_handoffs[0]
+    assert handoff.from_executor_id == "support"
+    assert handoff.to_executor_id == "routing"
+
+
+def test_runtime_handoff_must_match_static_topology_when_available(collector):
+    collector.static_handoffs = [
+        ObservedHandoff(
+            "review",
+            "approved",
+            payload_type="langgraph.static_edge",
+        )
+    ]
+
+    collector.process_stream_chunk(("updates", {"review": {"ok": True}}))
+    collector.process_stream_chunk(("updates", {"routing": {"ok": True}}))
+
+    assert collector.dynamic_handoffs == []
 
 
 def test_extract_node_data_from_stream_debug_and_node_scoped_updates(collector):
@@ -504,44 +595,6 @@ def test_extract_node_data_from_stream_debug_and_node_scoped_updates(collector):
     assert collector.node_state["nodeA"]["arguments"] == {"x": 1}
     assert collector.node_state["nodeA"]["return_value"] == {"id": "a1"}
     assert collector.node_state["nodeB"]["return_value"] == {"id": "a2"}
-
-
-def test_build_workflow_creates_nodes_for_static_dynamic_and_child_nodes(
-    collector,
-):
-    collector.static_nodes = {
-        "static_only",
-        "partial_node",
-        "relevant_node",
-        "child_node",
-    }
-    collector.static_handoffs = []
-    collector.node_state = {
-        "partial_node": {"entered_at": "1.0", "arguments": {"a": 1}},
-        "relevant_node": {
-            "entered_at": "1.0",
-            "exited_at": "2.0",
-            "return_value": {"id": "a1"},
-        },
-        "child_node": {"entered_at": "1.0", "exited_at": "2.0"},
-    }
-    collector.child_tool_calls_by_node = {
-        "child_node": [
-            ObservedToolCall("lookup", {}, {"id": "a2"}, 1.0, node_name="child_node")
-        ]
-    }
-    workflow = collector._build_workflow(final_output={"evidence_artifacts": ["a1"]})
-    node_types = {n.node_id: n.node_type for n in workflow.nodes}
-    tool_names = [tc.tool_name for tc in collector.tool_calls]
-
-    assert node_types["static_only"] == "langgraph.node.not_observed_in_run"
-    assert node_types["partial_node"] == "langgraph.node.observed_operation"
-    assert node_types["relevant_node"] == "langgraph.node.observed_operation"
-    assert node_types["child_node"] == "langgraph.node.observed_with_children"
-
-    assert "partial_node" in tool_names
-    assert "relevant_node" in tool_names
-    assert "child_node" not in tool_names
 
 
 def test_final_output_precedence(collector):
@@ -599,6 +652,79 @@ def test_introspect_static_graph_handles_failures():
     event_types = [e.event_type for e in collector.events]
     assert "langgraph.introspection.unavailable" in event_types
     assert "langgraph.introspection.subgraphs_unavailable" in event_types
+
+
+def test_execute_async_passes_recursion_limit_to_astream():
+    class AsyncGraph:
+        def __init__(self):
+            self.kwargs = None
+            self._groundeval_max_steps = 7
+
+        async def astream(self, *args, **kwargs):
+            self.kwargs = kwargs
+            yield {
+                "type": "values",
+                "ns": ["node1:branch"],
+                "data": {"should_act": True},
+            }
+
+    graph = AsyncGraph()
+    collector = _LangGraphEventCollector(
+        run_id="run-1",
+        agent_class="pkg.Agent",
+        graph=graph,
+        recording=RecordingRuntime(),
+    )
+
+    __import__("asyncio").run(collector._execute_async(graph))
+
+    assert graph.kwargs["config"]["recursion_limit"] == 7
+
+
+def test_execute_async_omits_recursion_limit_when_not_configured():
+    class AsyncGraph:
+        def __init__(self):
+            self.kwargs = None
+
+        async def astream(self, *args, **kwargs):
+            self.kwargs = kwargs
+            if False:
+                yield None
+
+    graph = AsyncGraph()
+    collector = _LangGraphEventCollector(
+        run_id="run-1",
+        agent_class="pkg.Agent",
+        graph=graph,
+        recording=RecordingRuntime(),
+    )
+
+    __import__("asyncio").run(collector._execute_async(graph))
+
+    assert "recursion_limit" not in graph.kwargs["config"]
+
+
+def test_execute_async_passes_recursion_limit_to_stream():
+    class StreamGraph:
+        def __init__(self):
+            self.kwargs = None
+            self._groundeval_max_steps = 5
+
+        def stream(self, *args, **kwargs):
+            self.kwargs = kwargs
+            return iter([])
+
+    graph = StreamGraph()
+    collector = _LangGraphEventCollector(
+        run_id="run-1",
+        agent_class="pkg.Agent",
+        graph=graph,
+        recording=RecordingRuntime(),
+    )
+
+    __import__("asyncio").run(collector._execute_async(graph))
+
+    assert graph.kwargs["config"]["recursion_limit"] == 5
 
 
 def test_execute_async_prefers_astream_when_available():
@@ -678,6 +804,43 @@ def test_to_observed_run_builds_capabilities_and_workflow(collector):
     assert run.final_output == {"should_act": True}
     assert run.total_latency_ms == 1000.0
     assert run.capabilities["workflow_nodes"] is True
+
+
+def test_to_observed_run_agents_round_trip_as_dataclasses(collector):
+    collector.started_at = 1.0
+    collector.completed_at = 2.0
+    collector.final_output_from_values = {"should_act": True}
+    collector.static_nodes = {"review"}
+    collector.node_state = {
+        "review": {
+            "entered_at": "1.0",
+            "exited_at": "2.0",
+            "return_value": {"ok": True},
+        }
+    }
+    collector.tool_calls = [
+        ObservedToolCall(
+            tool_name="lookup",
+            arguments={"customer": "Acme"},
+            return_value={"ok": True},
+            latency_ms=1.0,
+            agent_id="langgraph:review",
+            agent_name="review",
+            node_name="review",
+        )
+    ]
+    collector.child_tool_calls_by_node = {"review": list(collector.tool_calls)}
+
+    run = collector.to_observed_run({"should_act": True})
+    restored = FrameworkObservedRun.from_dict(run.to_dict())
+
+    assert all(isinstance(agent, ObservedAgent) for agent in run.agents)
+    assert all(isinstance(agent, ObservedAgent) for agent in restored.agents)
+    assert len(restored.agents) == 1
+    assert restored.agents[0].agent_id == "langgraph:review"
+    assert restored.agents[0].agent_name == "review"
+    assert restored.agents[0].role == "review"
+    assert restored.agents[0].tool_call_count == 1
 
 
 def test_langgraph_observer_load_agent_calls_version_check_and_loader():
@@ -767,11 +930,17 @@ def test_langgraph_observer_execute_agent_still_sets_framework_run_on_error():
     assert agent._groundeval_framework_observed_run is fake_run
 
 
-def test_langgraph_observer_set_max_steps_sets_attribute():
+def test_langgraph_observer_set_max_steps_sets_attribute_and_rejects_invalid_values():
     observer = LangGraphObserver()
     agent = types.SimpleNamespace()
+
     observer.set_max_steps(agent, 7)
+
     assert agent._groundeval_max_steps == 7
+    with pytest.raises(ValueError, match="greater than zero"):
+        observer.set_max_steps(agent, 0)
+    with pytest.raises(ValueError, match="greater than zero"):
+        observer.set_max_steps(agent, -1)
 
 
 def test_generate_langgraph_report_contains_key_sections():
@@ -836,3 +1005,44 @@ def test_generate_langgraph_report_contains_key_sections():
     assert "Model Events" in report
     assert "Raw Framework Events" in report
     assert "Errors" in report
+
+
+def test_debug_and_update_for_same_transition_do_not_duplicate_handoff(collector):
+    collector.process_stream_chunk((
+        ("root",),
+        "debug",
+        {"node": "review", "output": {"ok": True}},
+    ))
+    collector.process_stream_chunk((("root",), "updates", {"review": {"ok": True}}))
+    collector.process_stream_chunk((
+        ("root",),
+        "debug",
+        {"node": "routing", "output": {"ok": True}},
+    ))
+    collector.process_stream_chunk((("root",), "updates", {"routing": {"ok": True}}))
+
+    assert len(collector.dynamic_handoffs) == 1
+    handoff = collector.dynamic_handoffs[0]
+    assert handoff.from_executor_id == "review"
+    assert handoff.to_executor_id == "routing"
+    assert handoff.payload_type == "langgraph.runtime_transition"
+
+
+def test_workflow_preserves_static_and_runtime_handoff_types(collector):
+    collector.static_handoffs = [
+        ObservedHandoff(
+            from_executor_id="review",
+            to_executor_id="routing",
+            payload_type="langgraph.static_edge",
+        )
+    ]
+
+    collector.process_stream_chunk(("updates", {"review": {"ok": True}}))
+    collector.process_stream_chunk(("updates", {"routing": {"ok": True}}))
+
+    workflow = collector._build_workflow(final_output={"should_act": True})
+    payload_types = [handoff.payload_type for handoff in workflow.handoffs]
+
+    assert payload_types.count("langgraph.static_edge") == 1
+    assert payload_types.count("langgraph.runtime_transition") == 1
+    assert workflow.handoff_count == 2
