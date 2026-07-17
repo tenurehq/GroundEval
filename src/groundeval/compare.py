@@ -29,7 +29,7 @@ def compare_json_files(old_path: str | Path, new_path: str | Path) -> str:
             f"Old file: {old_file}",
             f"New file: {new_file}",
             "",
-            f"File types differ:",
+            "File types differ:",
             f"- old: {old_kind}",
             f"- new: {new_kind}",
             "",

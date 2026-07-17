@@ -1674,6 +1674,9 @@ dev = [
 maf = [
     { name = "agent-framework" },
 ]
+openai-agents = [
+    { name = "openai-agents" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1694,6 +1697,7 @@ dev = [
     { name = "ruff", specifier = ">=0.4.0" },
 ]
 maf = [{ name = "agent-framework" }]
+openai-agents = [{ name = "openai-agents" }]
 
 [[package]]
 name = "grpcio"

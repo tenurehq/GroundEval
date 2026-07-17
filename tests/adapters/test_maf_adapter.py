@@ -7,7 +7,6 @@ from groundeval.framework_adapters.maf_adapter import (
     MafObserver,
     _GroundEvalSpanExporter,
     _await_if_needed,
-    _build_maf_eval_agent_fn,
     _collect_async_iter,
     _enable_maf_instrumentation,
     _extract_final_output,
@@ -336,11 +335,6 @@ def test_maf_observer_execute_agent_records_framework_run():
 
     assert out == {"ok": True}
     assert hasattr(agent, "_groundeval_framework_observed_run")
-
-
-def test_build_maf_eval_agent_fn_raises():
-    with pytest.raises(RuntimeError, match="observe --score"):
-        _build_maf_eval_agent_fn("pkg.Agent")
 
 
 def test_generate_maf_report_contains_key_sections():

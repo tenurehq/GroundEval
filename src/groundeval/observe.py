@@ -154,6 +154,13 @@ def _try_auto_register(framework: str) -> None:
             register_observer("langgraph", LangGraphObserver())
         except ImportError:
             pass
+    elif framework == "openai_agents":
+        try:
+            from .framework_adapters.openai_agents_adapter import OpenAIAgentsObserver
+
+            register_observer("openai_agents", OpenAIAgentsObserver())
+        except ImportError:
+            pass
 
 
 def _parse_json_string(value: str) -> Any:
@@ -242,7 +249,7 @@ def observe_agent(
             if getattr(rich_run, "run_id", None):
                 run_id = str(rich_run.run_id)
             if getattr(rich_run, "final_output", None) is not None:
-                final_answer = rich_run.final_output
+                final_answer = _parse_observed_answer(rich_run.final_output)
             if getattr(rich_run, "total_latency_ms", None) is not None:
                 total_latency = float(rich_run.total_latency_ms)
         except Exception:
@@ -291,17 +298,33 @@ def _observed_run_to_trajectory(observed: ObservedRun, task_id: str) -> AgentTra
             workflow_run_id=tc.workflow_run_id,
             branch_id=tc.branch_id,
             parent_event_id=tc.parent_event_id,
+            agent_id=tc.agent_id,
+            observed_return_value=tc.return_value,
         )
         for tc in observed.tool_calls
     ]
     final_answer = (
         observed.final_answer if isinstance(observed.final_answer, dict) else {}
     )
+    framework_extra = observed.framework_extra or {}
+    workflow = framework_extra.get("workflow") or {}
+    observed_agents = [
+        dict(agent)
+        for agent in framework_extra.get("agents", [])
+        if isinstance(agent, dict)
+    ]
+    observed_handoffs = [
+        dict(handoff)
+        for handoff in workflow.get("handoffs", [])
+        if isinstance(handoff, dict)
+    ]
     return AgentTrajectory(
         task_id=task_id,
         tool_calls=tool_calls,
         final_answer=final_answer,
         total_latency_ms=float(observed.total_latency_ms),
+        observed_agents=observed_agents,
+        observed_handoffs=observed_handoffs,
     )
 
 

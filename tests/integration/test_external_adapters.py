@@ -14,7 +14,7 @@ from groundeval.observe import (
     score_observed_run,
     write_draft_output,
 )
-from groundeval.run import _write_basic_observation_outputs, cmd_observe
+from groundeval.run import _write_basic_observation_outputs
 
 
 class FakeSpanContext:
@@ -1252,8 +1252,13 @@ def test_adapter_non_dict_final_answer_surfaces_in_written_outputs_and_scoring(
 
     if case.framework == "crewai":
         if scenario.name == "final_answer_json_string":
-            assert isinstance(final_answer, str)
-            assert "account_review_complete" in final_answer
+            assert isinstance(final_answer, dict)
+            assert final_answer["all_preconditions_pass"] is True
+            assert final_answer["should_act"] is True
+            assert (
+                final_answer["preconditions_verified"][0]["check"]
+                == "account_review_complete"
+            )
         elif scenario.name == "final_answer_plain_text":
             assert (
                 final_answer
@@ -1404,7 +1409,7 @@ def test_observe_only_cases_always_write_and_read_observe_and_draft_files(
     draft_cfg = read_yaml(draft_dir / "draft_config" / "config.yaml")
     assert observe_json["framework"] == case.framework
     assert draft_cfg["agent"]["framework"] == case.framework
-    assert_written_files_clean(Path(f"."))
+    assert_written_files_clean(Path("."))
 
 
 def test_written_score_file_contains_expected_meta_and_native_tool_names(

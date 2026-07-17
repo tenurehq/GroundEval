@@ -3,7 +3,6 @@ from unittest.mock import patch
 
 import pytest
 
-from groundeval.core import TaskContract
 from groundeval.framework_adapters.crewai_adapter import (
     CrewAIObserver,
     _CrewAIEventCollector,

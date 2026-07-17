@@ -9,6 +9,7 @@
 | CrewAI | ✅ | ✅ | [docs/crewai.md](docs/crewai.md) |
 | LangGraph | ✅ | ✅ | [docs/langgraph.md](docs/langgraph.md) |
 | Microsoft Agent Framework | ✅ | ✅ | [docs/maf.md](docs/maf.md) |
+| OpenAI Agents SDK | ✅ | ✅ | [docs/openai-agents.md](docs/openai-agents.md) |
 | LlamaIndex | ⏳ | ⏳ | Planned |
 | Pydantic AI | ⏳ | ⏳ | Planned |
 
